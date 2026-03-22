@@ -65,8 +65,8 @@ def build_parser() -> argparse.ArgumentParser:
         description="Lightweight CLI Slurm cluster job monitor",
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
-    parser.add_argument("--db", default=None, help="SQLite database path (default: ~/.slurmmon-cli/data.db)")
-    parser.add_argument("--config", default=None, help="Config file path (default: ~/.slurmmon-cli/config.ini)")
+    parser.add_argument("--db", default=None, help="SQLite database path (default: $XDG_DATA_HOME/slurmmon-cli/data.db)")
+    parser.add_argument("--config", default=None, help="Config file path (default: $XDG_CONFIG_HOME/slurmmon-cli/config.ini)")
 
     sub = parser.add_subparsers(dest="command")
 

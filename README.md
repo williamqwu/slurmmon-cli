@@ -70,11 +70,16 @@ slurmmon-cli efficiency --job 12345 --gpu
 
 ## Config
 
-Settings are stored in `~/.slurmmon-cli/config.ini`. View with `slurmmon-cli config show`.
+File locations follow the [XDG Base Directory Specification](https://specifications.freedesktop.org/basedir-spec/latest/):
+
+- Config: `$XDG_CONFIG_HOME/slurmmon-cli/config.ini` (default: `~/.config/slurmmon-cli/config.ini`)
+- Data: `$XDG_DATA_HOME/slurmmon-cli/data.db` (default: `~/.local/share/slurmmon-cli/data.db`)
+
+View with `slurmmon-cli config show`.
 
 | Key | Default | Description |
 |-----|---------|-------------|
 | `general.osc` | `false` | Enable OSC-specific tools (osc-seff, gpu-seff) |
-| `general.db_path` | (empty) | SQLite path (default: `~/.slurmmon-cli/data.db`) |
+| `general.db_path` | (empty) | SQLite path (default: XDG data dir) |
 | `general.refresh_interval` | `30` | Dashboard refresh in seconds |
 | `general.retention_days` | `30` | Days to keep historical data |

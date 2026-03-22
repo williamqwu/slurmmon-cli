@@ -16,7 +16,16 @@ DEFAULTS = {
     },
 }
 
-DEFAULT_CONFIG_PATH = os.path.join(Path.home(), ".slurmmon-cli", "config.ini")
+APP_NAME = "slurmmon-cli"
+
+def _xdg_config_home() -> str:
+    return os.environ.get("XDG_CONFIG_HOME", os.path.join(Path.home(), ".config"))
+
+def _xdg_data_home() -> str:
+    return os.environ.get("XDG_DATA_HOME", os.path.join(Path.home(), ".local", "share"))
+
+DEFAULT_CONFIG_PATH = os.path.join(_xdg_config_home(), APP_NAME, "config.ini")
+DEFAULT_DATA_DIR = os.path.join(_xdg_data_home(), APP_NAME)
 
 
 class SlurmmonConfig:

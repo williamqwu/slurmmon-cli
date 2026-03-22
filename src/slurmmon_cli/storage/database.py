@@ -14,8 +14,9 @@ class Database:
 
     def __init__(self, db_path: str | None = None):
         if db_path is None:
-            db_dir = Path.home() / ".slurmmon-cli"
-            db_dir.mkdir(exist_ok=True)
+            from slurmmon_cli.config import DEFAULT_DATA_DIR
+            db_dir = Path(DEFAULT_DATA_DIR)
+            db_dir.mkdir(parents=True, exist_ok=True)
             db_path = str(db_dir / "data.db")
         self.db_path = db_path
         self._conn: sqlite3.Connection | None = None
