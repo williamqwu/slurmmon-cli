@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 
-SCHEMA_VERSION = "3"
+SCHEMA_VERSION = "4"
 
 DDL = """
 CREATE TABLE IF NOT EXISTS jobs (
@@ -26,7 +26,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     cpu_time_s    REAL,
     max_rss_mb    REAL,
     reason        TEXT,
-    last_seen     REAL NOT NULL
+    last_seen     REAL NOT NULL,
+    cluster       TEXT DEFAULT ''
 );
 
 CREATE INDEX IF NOT EXISTS idx_jobs_user ON jobs (user);
@@ -99,7 +100,7 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     except Exception:
         current = None
 
-    # Migration: v2 -> v3: add cluster column before DDL runs indexes on it
+    # Migration: v2 -> v3: add cluster column to user_usage
     if current and current < "3":
         try:
             conn.execute("ALTER TABLE user_usage ADD COLUMN cluster TEXT DEFAULT ''")
@@ -107,9 +108,18 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
         except Exception:
             pass  # column already exists
 
+    # Migration: v3 -> v4: add cluster column to jobs
+    if current and current < "4":
+        try:
+            conn.execute("ALTER TABLE jobs ADD COLUMN cluster TEXT DEFAULT ''")
+            conn.commit()
+        except Exception:
+            pass  # column already exists
+
     conn.executescript(DDL)
-    # Create cluster index (safe now that column exists)
+    # Create cluster indexes (safe now that columns exist)
     conn.execute("CREATE INDEX IF NOT EXISTS idx_uu_cluster ON user_usage (cluster)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_jobs_cluster ON jobs (cluster)")
 
     if current is None:
         conn.execute(

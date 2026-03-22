@@ -44,6 +44,7 @@ class SlurmmonApp(App):
         self.from_db = from_db
         self.config = config
         self.cluster_name = ""
+        self._collect_done = False
 
     def on_mount(self) -> None:
         from slurmmon_cli.tui.screens.monitor import MonitorScreen
@@ -90,13 +91,21 @@ class SlurmmonApp(App):
             if self.cluster_name:
                 self.sub_title = self.cluster_name
 
-            # Then collect
-            cfg = self.config
-            sshare_interval = int(cfg.get("general", "sshare_interval")) if cfg else 1800
+            # Then collect (force sshare on TUI startup so explorer has data)
             db = Database(self.db_path)
             db.connect()
             try:
-                stats = collect_snapshot(db, sshare_interval=sshare_interval)
+                # Fix stale cluster names from earlier runs
+                if self.cluster_name:
+                    for table in ("user_usage", "jobs"):
+                        db.conn.execute(
+                            f"UPDATE {table} SET cluster = ? "
+                            "WHERE cluster IN ('', 'unknown')",
+                            (self.cluster_name,),
+                        )
+                    db.conn.commit()
+                stats = collect_snapshot(db, sshare_interval=0,
+                                        cluster_override=self.cluster_name)
                 if not self.cluster_name:
                     self.cluster_name = stats.get("cluster", "")
                     if self.cluster_name:
@@ -105,6 +114,18 @@ class SlurmmonApp(App):
                 db.close()
         except Exception as exc:
             log.debug("Initial collection failed: %s", exc)
+        finally:
+            self.call_from_thread(self._on_collect_done)
+
+    def _on_collect_done(self) -> None:
+        """Notify the active screen that initial collection is complete."""
+        self._collect_done = True
+        # Only notify the currently visible screen (it is mounted and can
+        # spawn workers safely).  Other screens will pick up data via
+        # on_screen_resume or on_mount when the user navigates to them.
+        screen = self.screen
+        if hasattr(screen, "on_initial_collect_done"):
+            screen.on_initial_collect_done()
 
 
 def run_dashboard(

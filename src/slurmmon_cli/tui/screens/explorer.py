@@ -42,12 +42,12 @@ class ExplorerScreen(Screen):
                 yield DataTable(id="account-table")
             with TabPane("Nodes", id="tab-nodes"):
                 yield Static(
-                    " Keys: [o]sort [v]view [p]partition [arrows]navigate [enter]detail",
+                    " Keys: \[o]sort \[v]view \[p]partition \[arrows]navigate \[enter]detail",
                     id="nodes-hint",
                 )
                 yield NodeHeatmap(id="node-heatmap")
             with TabPane("GPU Chart", id="tab-chart"):
-                yield Static(" Keys: [c] switch metric", id="chart-hint")
+                yield Static(" Keys: \[c] switch metric", id="chart-hint")
                 yield GpuChart(id="gpu-chart")
         yield Footer()
 
@@ -70,11 +70,24 @@ class ExplorerScreen(Screen):
         )
         at.cursor_type = "row"
 
-        # Load after a short delay to give _initial_collect time to populate DB
-        self.set_timer(3.0, self._load_all_tabs)
+        # Poll until initial collection is done, then load data
+        self._startup_timer = self.set_interval(2.0, self._poll_for_data)
+
+    def _poll_for_data(self) -> None:
+        """Check if initial collection is done; load data and stop polling."""
+        try:
+            if getattr(self.app, '_collect_done', False):
+                self._startup_timer.stop()
+                self._load_all_tabs()
+        except Exception:
+            pass
 
     def on_screen_resume(self) -> None:
         """Reload data when user switches to this screen."""
+        self._load_all_tabs()
+
+    def on_initial_collect_done(self) -> None:
+        """Called by the app when background collection finishes."""
         self._load_all_tabs()
 
     def _get_cluster(self) -> str | None:

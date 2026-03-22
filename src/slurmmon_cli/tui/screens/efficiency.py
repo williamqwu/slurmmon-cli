@@ -8,7 +8,7 @@ import time
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.screen import Screen
-from textual.widgets import DataTable, Footer, Header, Static, TabbedContent, TabPane
+from textual.widgets import DataTable, Header, Static, TabbedContent, TabPane
 from textual import work
 
 from slurmmon_cli.tui.formatting import format_duration, sparkline
@@ -18,7 +18,7 @@ class EfficiencyScreen(Screen):
     """Job efficiency analysis, queue health, cluster trends, waste detection."""
 
     BINDINGS = [
-        Binding("r", "refresh", "Refresh", show=True),
+        Binding("r", "refresh", "Refresh", show=False),
     ]
 
     def compose(self) -> ComposeResult:
@@ -35,7 +35,8 @@ class EfficiencyScreen(Screen):
                 yield Static("", id="waste-header")
                 yield DataTable(id="waste-table")
                 yield Static("", id="waste-nodes")
-        yield Footer()
+        from slurmmon_cli.tui.widgets.grouped_footer import GroupedFooter, footer_markup
+        yield GroupedFooter(footer_markup("\\[R]efresh"))
 
     def on_mount(self) -> None:
         jt = self.query_one("#your-jobs-table", DataTable)
@@ -46,11 +47,24 @@ class EfficiencyScreen(Screen):
         wt.add_columns("JOBID", "USER", "PARTITION", "CPUS", "CPU EFF", "MEM EFF", "STATE")
         wt.cursor_type = "row"
 
-        # Load after a short delay to give _initial_collect time
-        self.set_timer(3.0, self._load_all)
+        # Poll until initial collection is done, then load data
+        self._startup_timer = self.set_interval(2.0, self._poll_for_data)
+
+    def _poll_for_data(self) -> None:
+        """Check if initial collection is done; load data and stop polling."""
+        try:
+            if getattr(self.app, '_collect_done', False):
+                self._startup_timer.stop()
+                self._load_all()
+        except Exception:
+            pass
 
     def on_screen_resume(self) -> None:
         """Reload data when user switches to this screen."""
+        self._load_all()
+
+    def on_initial_collect_done(self) -> None:
+        """Called by the app when background collection finishes."""
         self._load_all()
 
     def _load_all(self) -> None:

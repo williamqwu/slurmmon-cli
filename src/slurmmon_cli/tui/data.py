@@ -99,6 +99,57 @@ def fetch_node_data() -> tuple[list[NodeUtilization], dict[str, list[str]]]:
     return nodes, node_users
 
 
+def _rows_to_jobs(rows) -> list[Job]:
+    """Convert sqlite3.Row results to Job objects."""
+    return [
+        Job(
+            job_id=r["job_id"], user=r["user"], account=r["account"],
+            partition=r["partition"], state=r["state"],
+            num_cpus=r["num_cpus"] or 0, num_gpus=r["num_gpus"] or 0,
+            req_mem_mb=r["req_mem_mb"], submit_time=r["submit_time"],
+            start_time=r["start_time"], end_time=r["end_time"],
+            time_limit_s=r["time_limit_s"], elapsed_s=r["elapsed_s"],
+            node_list=r["node_list"], exit_code=r["exit_code"],
+            cpu_time_s=r["cpu_time_s"], max_rss_mb=r["max_rss_mb"],
+            reason=r["reason"],
+            cluster=r["cluster"] if "cluster" in r.keys() else "",
+        )
+        for r in rows
+    ]
+
+
+def fetch_user_jobs(db_path: str | None, user: str,
+                    gpu_only: bool = False) -> list[Job]:
+    """Fetch running/pending jobs for a user from the DB."""
+    from slurmmon_cli.storage.database import Database
+
+    db = Database(db_path)
+    with db:
+        gpu_filter = " AND num_gpus > 0" if gpu_only else ""
+        rows = db.conn.execute(
+            f"""SELECT * FROM jobs
+                WHERE user = ? AND state IN ('RUNNING', 'PENDING'){gpu_filter}
+                ORDER BY state, num_gpus DESC, submit_time DESC""",
+            (user,),
+        ).fetchall()
+    return _rows_to_jobs(rows)
+
+
+def fetch_account_jobs(db_path: str | None, account: str) -> list[Job]:
+    """Fetch running/pending jobs for an account from the DB."""
+    from slurmmon_cli.storage.database import Database
+
+    db = Database(db_path)
+    with db:
+        rows = db.conn.execute(
+            """SELECT * FROM jobs
+               WHERE account = ? AND state IN ('RUNNING', 'PENDING')
+               ORDER BY user, state, num_gpus DESC, submit_time DESC""",
+            (account,),
+        ).fetchall()
+    return _rows_to_jobs(rows)
+
+
 def compute_user_node_breakdown(
     nodes: list[NodeUtilization],
 ) -> dict[str, dict[str, int]]:
@@ -155,12 +206,23 @@ def compute_account_node_breakdown(
 
 
 def _detect_cluster() -> str:
-    """Detect current cluster name from scontrol (lightweight, single node query)."""
+    """Detect current cluster name, with scontrol fallback for empty sinfo."""
     try:
-        # Use sinfo which is already cached in many cases
         info = get_cluster_info()
         if info and info.cluster_name and info.cluster_name != "unknown":
             return info.cluster_name
+    except Exception:
+        pass
+    # Fallback: scontrol show config
+    try:
+        import subprocess as _sp
+        result = _sp.run(
+            ["scontrol", "show", "config"],
+            capture_output=True, text=True, timeout=10,
+        )
+        for line in result.stdout.splitlines():
+            if line.strip().startswith("ClusterName"):
+                return line.split("=", 1)[1].strip()
     except Exception:
         pass
     return ""

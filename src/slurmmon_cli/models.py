@@ -23,6 +23,7 @@ class Job:
     cpu_time_s: float | None
     max_rss_mb: float | None
     reason: str | None
+    cluster: str = ""
 
 
 @dataclass(slots=True)
