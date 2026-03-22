@@ -182,3 +182,7 @@ class ExplorerScreen(Screen):
     def action_cycle_chart(self) -> None:
         chart = self.query_one("#gpu-chart", GpuChart)
         chart.cycle_mode()
+
+    def on_node_heatmap_node_selected(self, message: NodeHeatmap.NodeSelected) -> None:
+        from slurmmon_cli.tui.screens.node_detail import NodeDetailScreen
+        self.app.push_screen(NodeDetailScreen(message.node))

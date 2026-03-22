@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from rich.segment import Segment
 from rich.style import Style
+from textual.events import Key
+from textual.message import Message
 from textual.strip import Strip
 from textual.widget import Widget
 
@@ -14,6 +16,7 @@ _GREEN = Style(color="black", bgcolor="green")
 _YELLOW = Style(color="black", bgcolor="yellow")
 _RED = Style(color="white", bgcolor="red")
 _GRAY = Style(color="white", bgcolor="#444444")
+_SELECTED = Style(color="white", bgcolor="blue", bold=True)
 _HEADER_STYLE = Style(color="cyan", bold=True)
 _CELL_WIDTH = 10
 _LINES_PER_NODE = 3  # name, user, metric
@@ -43,7 +46,6 @@ def _is_exclusive(n: NodeUtilization) -> bool:
 
 
 def _ratio_style(ratio: float | None) -> Style:
-    """Color style based on a 0-1 utilization ratio."""
     if ratio is None:
         return _GRAY
     if ratio >= 0.8:
@@ -54,49 +56,38 @@ def _ratio_style(ratio: float | None) -> Style:
 
 
 def _get_node_metric(n: NodeUtilization, view: str) -> tuple[float | None, str]:
-    """Get (ratio, display_string) for a node based on view mode."""
     if view == "cpu_load":
         ratio = n.load_ratio if n.cpus_alloc > 0 else None
-        if ratio is not None:
-            label = f"{ratio * 100:.0f}%"
-        else:
-            label = "--"
+        label = f"{ratio * 100:.0f}%" if ratio is not None else "--"
     elif view == "memory":
         if n.mem_total_mb > 0 and n.mem_alloc_mb > 0:
             ratio = n.mem_alloc_mb / n.mem_total_mb
-            mem_gb = n.mem_alloc_mb / 1024
-            label = f"{mem_gb:.0f}G"
+            label = f"{n.mem_alloc_mb / 1024:.0f}G"
         else:
-            ratio = None
-            label = "--"
+            ratio, label = None, "--"
     elif view == "gpu_alloc":
         if n.gpus_total > 0:
             ratio = n.gpus_alloc / n.gpus_total
             label = f"{n.gpus_alloc}/{n.gpus_total}"
         elif n.cpus_alloc > 0:
-            # Non-GPU node that is allocated
-            ratio = None
-            label = "no gpu"
+            ratio, label = None, "no gpu"
         else:
-            ratio = None
-            label = "--"
+            ratio, label = None, "--"
     else:
-        ratio = None
-        label = "--"
+        ratio, label = None, "--"
     return ratio, label
 
 
 def _render_node_cell(n: NodeUtilization, line_in_cell: int,
-                      view: str) -> tuple[str, Style]:
-    """Render one line of a node cell. Returns (cell_text, style)."""
+                      view: str, selected: bool = False) -> tuple[str, Style]:
     ratio, metric_label = _get_node_metric(n, view)
-    style = _ratio_style(ratio) if n.cpus_alloc > 0 else _GRAY
+    style = _SELECTED if selected else (_ratio_style(ratio) if n.cpus_alloc > 0 else _GRAY)
     exclusive = _is_exclusive(n)
     inner_w = _CELL_WIDTH - 2
 
     if line_in_cell == 0:
         name = n.name[-inner_w:] if len(n.name) > inner_w else n.name
-        if exclusive:
+        if exclusive and not selected:
             fill = "\u2500" * (inner_w - len(name))
             cell = f"\u250c{name}{fill}\u2510"
         else:
@@ -111,12 +102,12 @@ def _render_node_cell(n: NodeUtilization, line_in_cell: int,
                     uname = uname[:inner_w]
         else:
             uname = "-"
-        if exclusive:
+        if exclusive and not selected:
             cell = f"\u2502{uname:^{inner_w}}\u2502"
         else:
             cell = f" {uname:^{inner_w}} "
     else:
-        if exclusive:
+        if exclusive and not selected:
             fill = "\u2500" * (inner_w - len(metric_label))
             cell = f"\u2514{metric_label}{fill}\u2518"
         else:
@@ -125,24 +116,33 @@ def _render_node_cell(n: NodeUtilization, line_in_cell: int,
     return cell, style
 
 
-class NodeHeatmap(Widget):
+class NodeHeatmap(Widget, can_focus=True):
     """Grid of nodes colored by utilization metric, grouped by partition.
 
-    View modes: CPU load, memory usage, GPU allocation.
-    Exclusive-use nodes get box-drawing borders.
-    Nodes can be filtered to show only selected partitions.
+    Arrow keys navigate between nodes, Enter shows detail popup.
     """
+
+    class NodeSelected(Message):
+        """Posted when user presses Enter on a node."""
+        def __init__(self, node: NodeUtilization) -> None:
+            self.node = node
+            super().__init__()
 
     DEFAULT_CSS = """
     NodeHeatmap {
         height: auto;
         min-height: 3;
     }
+    NodeHeatmap:focus {
+        border: tall $accent;
+    }
     """
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
         self._all_nodes: list[NodeUtilization] = []
+        self._displayed_nodes: list[NodeUtilization] = []  # flat ordered list
+        self._selected_idx: int = 0
         self._show_users = False
         self._sort_mode = "name"
         self._view_mode = "cpu_load"
@@ -162,7 +162,6 @@ class NodeHeatmap(Widget):
         self._rebuild()
 
     def _sort_key(self, n: NodeUtilization):
-        """Sort key based on current view mode metric."""
         ratio, _ = _get_node_metric(n, self._view_mode)
         return ratio if ratio is not None else 999
 
@@ -179,6 +178,7 @@ class NodeHeatmap(Widget):
 
     def _rebuild(self) -> None:
         self._render_lines = []
+        self._displayed_nodes = []
         width = self.size.width if self.size.width > 0 else 120
         self._cols = max(1, width // _CELL_WIDTH)
 
@@ -190,11 +190,10 @@ class NodeHeatmap(Widget):
             ]
 
         if not filtered:
-            self._render_lines.append([(" No nodes to display", Style(color="yellow"))])
+            self._render_lines.append([(" No nodes to display (use 'p' to change partition)", Style(color="yellow"))])
             self.refresh()
             return
 
-        # Legend line
         filter_info = ""
         if self._partition_filter:
             filter_info = f"  [{','.join(sorted(self._partition_filter))}]"
@@ -210,7 +209,7 @@ class NodeHeatmap(Widget):
             ("\u2588 50-80%", _YELLOW), (" ", Style()),
             ("\u2588<50%", _RED), (" ", Style()),
             ("\u2588idle", _GRAY),
-            ("  \u250c\u2500\u2510=exclusive(1 user, full node) ", Style(bold=True)),
+            ("  [boxed]=exclusive  ", Style(bold=True)),
             (view_label, Style(color="cyan")),
             ("  ", Style()),
             (sort_label, Style(dim=True)),
@@ -239,18 +238,66 @@ class NodeHeatmap(Widget):
             sorted_nodes = self._apply_sort(filtered)
             self._add_node_grid(sorted_nodes)
 
+        # Clamp selection
+        if self._displayed_nodes:
+            self._selected_idx = min(self._selected_idx, len(self._displayed_nodes) - 1)
+        else:
+            self._selected_idx = 0
+
         self.refresh()
 
     def _add_node_grid(self, nodes: list[NodeUtilization]) -> None:
         cols = self._cols
+        base_idx = len(self._displayed_nodes)
+        self._displayed_nodes.extend(nodes)
+
         for row_start in range(0, len(nodes), cols):
             row_nodes = nodes[row_start:row_start + cols]
             for line_idx in range(_LINES_PER_NODE):
                 line: list[tuple[str, Style]] = [(" ", Style())]
-                for n in row_nodes:
-                    cell, style = _render_node_cell(n, line_idx, self._view_mode)
+                for i, n in enumerate(row_nodes):
+                    flat_idx = base_idx + row_start + i
+                    is_selected = (flat_idx == self._selected_idx) and self.has_focus
+                    cell, style = _render_node_cell(n, line_idx, self._view_mode, selected=is_selected)
                     line.append((cell, style))
                 self._render_lines.append(line)
+
+    def on_key(self, event: Key) -> None:
+        if not self._displayed_nodes:
+            return
+        total = len(self._displayed_nodes)
+        cols = self._cols
+
+        if event.key == "right":
+            self._selected_idx = min(self._selected_idx + 1, total - 1)
+            event.stop()
+        elif event.key == "left":
+            self._selected_idx = max(self._selected_idx - 1, 0)
+            event.stop()
+        elif event.key == "down":
+            new = self._selected_idx + cols
+            if new < total:
+                self._selected_idx = new
+            event.stop()
+        elif event.key == "up":
+            new = self._selected_idx - cols
+            if new >= 0:
+                self._selected_idx = new
+            event.stop()
+        elif event.key == "enter":
+            node = self._displayed_nodes[self._selected_idx]
+            self.post_message(self.NodeSelected(node))
+            event.stop()
+        else:
+            return
+
+        self._rebuild()
+
+    def on_focus(self, _) -> None:
+        self._rebuild()
+
+    def on_blur(self, _) -> None:
+        self._rebuild()
 
     def cycle_sort(self) -> None:
         idx = SORT_MODES.index(self._sort_mode)
@@ -258,7 +305,6 @@ class NodeHeatmap(Widget):
         self._rebuild()
 
     def cycle_view(self) -> None:
-        """Cycle between CPU load, memory, GPU allocation views."""
         idx = VIEW_MODES.index(self._view_mode)
         self._view_mode = VIEW_MODES[(idx + 1) % len(VIEW_MODES)]
         self._rebuild()
@@ -279,6 +325,7 @@ class NodeHeatmap(Widget):
                     self._partition_filter = None
             else:
                 self._partition_filter = None
+        self._selected_idx = 0
         self._rebuild()
 
     def get_content_height(self, container, viewport, width) -> int:

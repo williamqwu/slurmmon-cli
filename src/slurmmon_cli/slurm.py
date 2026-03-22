@@ -952,3 +952,16 @@ def get_running_jobs_by_node() -> dict[str, list[str]]:
             if job.user not in node_users[node]:
                 node_users[node].append(job.user)
     return node_users
+
+
+def get_jobs_on_node(node_name: str) -> list[Job]:
+    """Get all running jobs on a specific node."""
+    jobs = get_queue()
+    result: list[Job] = []
+    for job in jobs:
+        if job.state != "RUNNING" or not job.node_list:
+            continue
+        nodes = expand_node_list(job.node_list)
+        if node_name in nodes:
+            result.append(job)
+    return result
