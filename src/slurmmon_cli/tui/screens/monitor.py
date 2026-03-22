@@ -7,7 +7,7 @@ import time
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.screen import Screen
-from textual.widgets import DataTable, Footer, Header, Static
+from textual.widgets import DataTable, Header, Static
 from textual import work
 
 from slurmmon_cli.tui.formatting import format_duration, format_mem
@@ -18,9 +18,9 @@ class MonitorScreen(Screen):
     """Real-time Slurm cluster monitoring dashboard."""
 
     BINDINGS = [
-        Binding("r", "refresh", "Refresh", show=True),
-        Binding("u", "toggle_user", "User filter", show=True),
-        Binding("p", "toggle_partition", "Partition filter", show=True),
+        Binding("r", "refresh", "Refresh", show=False),
+        Binding("u", "toggle_user", "User filter", show=False),
+        Binding("p", "toggle_partition", "Partition filter", show=False),
     ]
 
     def compose(self) -> ComposeResult:
@@ -32,7 +32,10 @@ class MonitorScreen(Screen):
         yield DataTable(id="running-table")
         yield Static("PENDING JOBS", classes="section-label")
         yield DataTable(id="pending-table")
-        yield Footer()
+        from slurmmon_cli.tui.widgets.grouped_footer import GroupedFooter, footer_markup
+        yield GroupedFooter(footer_markup(
+            "\\[R]efresh", "\\[U]ser", "\\[P]artition",
+        ))
 
     def on_mount(self) -> None:
         # Partition table

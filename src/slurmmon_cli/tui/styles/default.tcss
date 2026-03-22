@@ -36,11 +36,23 @@ Screen {
     height: 1fr;
 }
 
-#fairshare-note, #cpu-hint, #accounts-hint, #nodes-hint, #chart-hint {
+#fairshare-note {
+    height: auto;
+    color: $text-muted;
+    padding: 0 1;
+}
+
+#gpu-hint, #cpu-hint, #accounts-hint, #nodes-hint, #nodes-desc, #chart-hint {
     height: 1;
     color: $text-muted;
     background: $surface;
     padding: 0 0;
+}
+
+#user-detail-hint, #account-detail-hint {
+    height: 1;
+    color: $text-muted;
+    margin: 1 0 0 0;
 }
 
 /* Efficiency */

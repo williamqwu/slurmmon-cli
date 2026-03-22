@@ -7,7 +7,7 @@ import json
 from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.screen import Screen
-from textual.widgets import DataTable, Footer, Header, Static, TabbedContent, TabPane
+from textual.widgets import DataTable, Header, Static, TabbedContent, TabPane
 from textual import work
 
 from slurmmon_cli.tui.widgets.node_heatmap import NodeHeatmap
@@ -18,8 +18,7 @@ class ExplorerScreen(Screen):
     """GPU and resource usage explorer with tabbed analysis views."""
 
     BINDINGS = [
-        Binding("r", "refresh", "Refresh", show=True),
-        # These bindings work but are not shown in footer (hints are inline per tab)
+        Binding("r", "refresh", "Refresh", show=False),
         Binding("o", "cycle_sort", show=False),
         Binding("v", "cycle_view", show=False),
         Binding("p", "cycle_partition", show=False),
@@ -30,31 +29,46 @@ class ExplorerScreen(Screen):
         yield Header()
         with TabbedContent(id="explorer-tabs"):
             with TabPane("GPU Users", id="tab-gpu"):
-                yield DataTable(id="gpu-table")
                 yield Static(
-                    " \\[enter] user jobs  |  "
-                    "FAIRSHARE: Slurm scheduling priority (0-1, higher = higher priority)",
-                    id="fairshare-note",
+                    " Top users by GPU-hours (sshare)  "
+                    "\\[enter] detail  \\[esc] back  |  "
+                    "FAIRSHARE: priority 0-1, higher = higher",
+                    id="gpu-hint",
                 )
+                yield DataTable(id="gpu-table")
             with TabPane("CPU Users", id="tab-cpu"):
+                yield Static(
+                    " Top users by CPU-hours (sshare)  "
+                    "\\[enter] detail  \\[esc] back",
+                    id="cpu-hint",
+                )
                 yield DataTable(id="cpu-table")
-                yield Static(" \\[enter] user jobs", id="cpu-hint")
             with TabPane("Accounts", id="tab-accounts"):
+                yield Static(
+                    " Top accounts by GPU-hours  "
+                    "\\[enter] detail  \\[esc] back",
+                    id="accounts-hint",
+                )
                 yield DataTable(id="account-table")
-                yield Static(" \\[enter] account jobs", id="accounts-hint")
             with TabPane("Nodes", id="tab-nodes"):
                 yield Static(
                     " \\[o] sort  \\[v] view  \\[p] partition  \\[arrows] navigate  \\[enter] detail",
                     id="nodes-hint",
                 )
+                yield Static(
+                    " Live node utilization heatmap  \\[esc] back from detail",
+                    id="nodes-desc",
+                )
                 yield NodeHeatmap(id="node-heatmap")
             with TabPane("GPU Chart", id="tab-chart"):
                 yield Static(
-                    " \\[c] switch metric  \\[up/down] navigate  \\[enter] user jobs",
+                    " GPU usage visualization  "
+                    "\\[c] metric  \\[up/down] navigate  \\[enter] detail  \\[esc] back",
                     id="chart-hint",
                 )
                 yield GpuChart(id="gpu-chart")
-        yield Footer()
+        from slurmmon_cli.tui.widgets.grouped_footer import GroupedFooter, footer_markup
+        yield GroupedFooter(footer_markup("\\[R]efresh"))
 
     def on_mount(self) -> None:
         self._gpu_rows: list[dict] = []
@@ -93,6 +107,15 @@ class ExplorerScreen(Screen):
 
     def on_screen_resume(self) -> None:
         """Reload data when user switches to this screen."""
+        # Save cursor positions so they survive the reload
+        self._saved_cursors = {}
+        for tid in ("gpu-table", "cpu-table", "account-table"):
+            try:
+                self._saved_cursors[tid] = self.query_one(
+                    f"#{tid}", DataTable
+                ).cursor_row
+            except Exception:
+                pass
         self._load_all_tabs()
 
     def on_initial_collect_done(self) -> None:
@@ -135,6 +158,10 @@ class ExplorerScreen(Screen):
             gt.add_row(str(i), r.get("user", "?"), r.get("account", "-"),
                        f"{gpu_hrs:,}", jobs_str, nodes_str, fair, types)
 
+        saved = getattr(self, '_saved_cursors', {}).get('gpu-table', 0)
+        if rows and 0 < saved < len(rows):
+            gt.move_cursor(row=saved)
+
         chart = self.query_one("#gpu-chart", GpuChart)
         chart.set_data(rows)
 
@@ -157,6 +184,9 @@ class ExplorerScreen(Screen):
             fair = f"{r['fairshare']:.2f}" if r.get("fairshare") is not None else "-"
             ct.add_row(str(i), r.get("user", "?"), r.get("account", "-"),
                        f"{cpu_hrs:,}", f"{gpu_hrs:,}", fair)
+        saved = getattr(self, '_saved_cursors', {}).get('cpu-table', 0)
+        if rows and 0 < saved < len(rows):
+            ct.move_cursor(row=saved)
 
     # --- Accounts ---
 
@@ -181,6 +211,9 @@ class ExplorerScreen(Screen):
             at.add_row(str(i), r.get("account", "?"),
                        f"{gpu_hrs:,}", f"{cpu_hrs:,}", str(r.get("num_users", 0)),
                        f"{jr}/{jp}", f"{fn}/{pn}")
+        saved = getattr(self, '_saved_cursors', {}).get('account-table', 0)
+        if rows and 0 < saved < len(rows):
+            at.move_cursor(row=saved)
 
     # --- Nodes ---
 

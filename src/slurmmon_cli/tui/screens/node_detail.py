@@ -6,7 +6,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import DataTable, Footer, Static
+from textual.widgets import DataTable, Static
 from textual import work
 
 from slurmmon_cli.models import NodeUtilization
@@ -25,7 +25,9 @@ class NodeDetailScreen(ModalScreen):
         align: center middle;
     }
     #node-detail-container {
-        width: 90;
+        width: 90%;
+        min-width: 80;
+        max-width: 140;
         max-height: 85%;
         border: thick $accent;
         padding: 1 2;

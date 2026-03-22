@@ -19,11 +19,13 @@ class SlurmmonApp(App):
     ENABLE_COMMAND_PALETTE = False
 
     BINDINGS = [
-        Binding("m", "switch_screen('monitor')", "[M]onitor [X]plore [E]fficiency [S]ettings", show=True),
+        Binding("m", "switch_screen('monitor')", "Monitor", show=False),
         Binding("x", "switch_screen('explorer')", "Explore", show=False),
         Binding("e", "switch_screen('efficiency')", "Efficiency", show=False),
-        Binding("s", "push_screen('settings')", "Settings", show=False),
-        Binding("q", "quit", "Quit", show=True),
+        Binding("question_mark", "push_screen('settings')", "Settings", show=False),
+        Binding("q", "quit", "Quit", show=False),
+        Binding("left", "hscroll(-3)", "Scroll left", show=False),
+        Binding("right", "hscroll(3)", "Scroll right", show=False),
     ]
 
     def __init__(
@@ -116,6 +118,14 @@ class SlurmmonApp(App):
             log.debug("Initial collection failed: %s", exc)
         finally:
             self.call_from_thread(self._on_collect_done)
+
+    def action_hscroll(self, delta: int) -> None:
+        """Scroll the focused widget horizontally."""
+        focused = self.focused
+        if focused is not None and hasattr(focused, "scroll_to"):
+            focused.scroll_to(
+                x=focused.scroll_x + delta, animate=False,
+            )
 
     def _on_collect_done(self) -> None:
         """Notify the active screen that initial collection is complete."""

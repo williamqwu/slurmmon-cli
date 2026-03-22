@@ -8,7 +8,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.containers import VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Footer, Header, Input, Label, Static, Switch
+from textual.widgets import Header, Input, Label, Static, Switch
 
 
 class SettingsScreen(ModalScreen):
