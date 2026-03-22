@@ -36,7 +36,7 @@ class EfficiencyScreen(Screen):
                 yield DataTable(id="waste-table")
                 yield Static("", id="waste-nodes")
         from slurmmon_cli.tui.widgets.grouped_footer import GroupedFooter, footer_markup
-        yield GroupedFooter(footer_markup("\\[R]efresh"))
+        yield GroupedFooter(footer_markup("\\[R]efresh", tabs=True))
 
     def on_mount(self) -> None:
         jt = self.query_one("#your-jobs-table", DataTable)

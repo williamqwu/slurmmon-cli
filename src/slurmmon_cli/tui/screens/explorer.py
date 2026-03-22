@@ -72,7 +72,7 @@ class ExplorerScreen(Screen):
                 )
                 yield GpuChart(id="gpu-chart")
         from slurmmon_cli.tui.widgets.grouped_footer import GroupedFooter, footer_markup
-        yield GroupedFooter(footer_markup("\\[R]efresh"))
+        yield GroupedFooter(footer_markup("\\[R]efresh", tabs=True))
 
     def on_mount(self) -> None:
         self._gpu_rows: list[dict] = []

@@ -9,16 +9,20 @@ NAV = "[dim]Nav[/] \\[M]onitor \\[X]plore \\[E]fficiency"
 TAIL = "\\[?] Settings  \\[Q] Quit"
 
 
-def footer_markup(*action_keys: str) -> str:
+def footer_markup(*action_keys: str, tabs: bool = False) -> str:
     """Build a grouped footer markup string.
 
     *action_keys* are pre-formatted Rich markup fragments for the
     current screen's action group (e.g. ``"\\\\[R]efresh"``).
+    Set *tabs=True* to include a Tab hint for tabbed screens.
     """
+    parts = [f" {NAV}"]
     if action_keys:
-        actions = "[dim]Action[/] " + " ".join(action_keys)
-        return f" {NAV}  {actions}  {TAIL}"
-    return f" {NAV}  {TAIL}"
+        parts.append("[dim]Action[/] " + " ".join(action_keys))
+    if tabs:
+        parts.append("\\[Tab] switch tab")
+    parts.append(TAIL)
+    return "  ".join(parts)
 
 
 class GroupedFooter(Static):
