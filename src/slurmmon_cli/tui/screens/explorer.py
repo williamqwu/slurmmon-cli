@@ -19,10 +19,11 @@ class ExplorerScreen(Screen):
 
     BINDINGS = [
         Binding("r", "refresh", "Refresh", show=True),
-        Binding("o", "cycle_sort", "Sort nodes", show=True),
-        Binding("v", "cycle_view", "Node view", show=True),
-        Binding("p", "cycle_partition", "Partition", show=True),
-        Binding("c", "cycle_chart", "Chart mode", show=True),
+        # These bindings work but are not shown in footer (hints are inline per tab)
+        Binding("o", "cycle_sort", show=False),
+        Binding("v", "cycle_view", show=False),
+        Binding("p", "cycle_partition", show=False),
+        Binding("c", "cycle_chart", show=False),
     ]
 
     def compose(self) -> ComposeResult:
@@ -69,8 +70,8 @@ class ExplorerScreen(Screen):
         )
         at.cursor_type = "row"
 
-        # Don't load immediately - wait for screen_resume or manual refresh
-        # _initial_collect may not have finished populating DB yet
+        # Load after a short delay to give _initial_collect time to populate DB
+        self.set_timer(3.0, self._load_all_tabs)
 
     def on_screen_resume(self) -> None:
         """Reload data when user switches to this screen."""
