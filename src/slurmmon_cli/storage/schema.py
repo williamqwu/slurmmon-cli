@@ -85,26 +85,31 @@ CREATE TABLE IF NOT EXISTS user_usage (
 CREATE INDEX IF NOT EXISTS idx_uu_collected ON user_usage (collected_at);
 CREATE INDEX IF NOT EXISTS idx_uu_user ON user_usage (user);
 CREATE INDEX IF NOT EXISTS idx_uu_gpu ON user_usage (gpu_tres_mins);
-CREATE INDEX IF NOT EXISTS idx_uu_cluster ON user_usage (cluster);
 """
 
 
 def ensure_schema(conn: sqlite3.Connection) -> None:
     """Create tables if they don't exist and apply migrations."""
-    conn.executescript(DDL)
+    # Check current version before running DDL
+    try:
+        row = conn.execute(
+            "SELECT value FROM metadata WHERE key = 'schema_version'"
+        ).fetchone()
+        current = row[0] if row else None
+    except Exception:
+        current = None
 
-    row = conn.execute(
-        "SELECT value FROM metadata WHERE key = 'schema_version'"
-    ).fetchone()
-    current = row[0] if row else None
-
-    # Migration: v2 -> v3: add cluster column to user_usage
+    # Migration: v2 -> v3: add cluster column before DDL runs indexes on it
     if current and current < "3":
         try:
             conn.execute("ALTER TABLE user_usage ADD COLUMN cluster TEXT DEFAULT ''")
+            conn.commit()
         except Exception:
             pass  # column already exists
-        conn.execute("CREATE INDEX IF NOT EXISTS idx_uu_cluster ON user_usage (cluster)")
+
+    conn.executescript(DDL)
+    # Create cluster index (safe now that column exists)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_uu_cluster ON user_usage (cluster)")
 
     if current is None:
         conn.execute(
