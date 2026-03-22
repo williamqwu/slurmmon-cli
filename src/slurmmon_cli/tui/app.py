@@ -67,6 +67,7 @@ class SlurmmonApp(App):
     @work(thread=True)
     def _initial_collect(self) -> None:
         """Detect cluster and run one collect cycle in background."""
+        stats: dict = {}
         try:
             from slurmmon_cli.slurm import get_cluster_info, run_slurm_command
             from slurmmon_cli.storage.collector import collect_snapshot
@@ -117,7 +118,7 @@ class SlurmmonApp(App):
         except Exception as exc:
             log.debug("Initial collection failed: %s", exc)
         finally:
-            self.call_from_thread(self._on_collect_done)
+            self.call_from_thread(self._on_collect_done, stats)
 
     def action_hscroll(self, delta: int) -> None:
         """Scroll the focused widget horizontally."""
@@ -127,7 +128,7 @@ class SlurmmonApp(App):
                 x=focused.scroll_x + delta, animate=False,
             )
 
-    def _on_collect_done(self) -> None:
+    def _on_collect_done(self, stats: dict | None = None) -> None:
         """Notify the active screen that initial collection is complete."""
         self._collect_done = True
         # Only notify the currently visible screen (it is mounted and can
@@ -136,6 +137,26 @@ class SlurmmonApp(App):
         screen = self.screen
         if hasattr(screen, "on_initial_collect_done"):
             screen.on_initial_collect_done()
+
+        # Toast notification with collection summary
+        if stats:
+            parts = []
+            qj = stats.get("queue_jobs", 0)
+            hj = stats.get("history_jobs", 0)
+            su = stats.get("sshare_users", 0)
+            if qj:
+                parts.append(f"{qj} queued jobs")
+            if hj:
+                parts.append(f"{hj} history jobs")
+            if su:
+                parts.append(f"{su} sshare users")
+            msg = "Collection complete: " + ", ".join(parts) if parts else "Collection complete"
+            from slurmmon_cli.storage.database import Database
+            db_path = Database(self.db_path).db_path
+            msg += f"\nDB: {db_path}"
+            self.notify(msg, severity="information", timeout=6)
+        else:
+            self.notify("Collection finished (no new data)", timeout=4)
 
 
 def run_dashboard(

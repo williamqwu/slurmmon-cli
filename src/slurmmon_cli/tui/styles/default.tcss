@@ -36,10 +36,12 @@ Screen {
     height: 1fr;
 }
 
-#fairshare-note {
-    height: auto;
-    color: $text-muted;
-    padding: 0 1;
+#collect-status {
+    height: 1;
+    color: $warning;
+    background: $surface;
+    text-style: italic;
+    padding: 0 0;
 }
 
 #gpu-hint, #cpu-hint, #accounts-hint, #nodes-hint, #nodes-desc, #chart-hint {

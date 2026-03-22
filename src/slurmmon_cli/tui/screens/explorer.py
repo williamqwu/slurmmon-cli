@@ -27,6 +27,10 @@ class ExplorerScreen(Screen):
 
     def compose(self) -> ComposeResult:
         yield Header()
+        yield Static(
+            " Collecting cluster data (squeue, sinfo, sacct, sshare)...",
+            id="collect-status",
+        )
         with TabbedContent(id="explorer-tabs"):
             with TabPane("GPU Users", id="tab-gpu"):
                 yield Static(
@@ -101,12 +105,20 @@ class ExplorerScreen(Screen):
         try:
             if getattr(self.app, '_collect_done', False):
                 self._startup_timer.stop()
+                self._hide_collect_status()
                 self._load_all_tabs()
+        except Exception:
+            pass
+
+    def _hide_collect_status(self) -> None:
+        try:
+            self.query_one("#collect-status", Static).display = False
         except Exception:
             pass
 
     def on_screen_resume(self) -> None:
         """Reload data when user switches to this screen."""
+        self._hide_collect_status()
         # Save cursor positions so they survive the reload
         self._saved_cursors = {}
         for tid in ("gpu-table", "cpu-table", "account-table"):
@@ -120,6 +132,7 @@ class ExplorerScreen(Screen):
 
     def on_initial_collect_done(self) -> None:
         """Called by the app when background collection finishes."""
+        self._hide_collect_status()
         self._load_all_tabs()
 
     def _get_cluster(self) -> str | None:
