@@ -6,28 +6,42 @@ import json
 import sqlite3
 
 
-def _latest_collected_at(conn: sqlite3.Connection) -> float | None:
-    """Get the timestamp of the most recent sshare collection."""
-    row = conn.execute(
-        "SELECT MAX(collected_at) FROM user_usage"
-    ).fetchone()
+def _latest_collected_at(conn: sqlite3.Connection,
+                        cluster: str | None = None) -> float | None:
+    """Get the timestamp of the most recent sshare collection for a cluster."""
+    if cluster:
+        row = conn.execute(
+            "SELECT MAX(collected_at) FROM user_usage WHERE cluster = ?",
+            (cluster,),
+        ).fetchone()
+    else:
+        row = conn.execute(
+            "SELECT MAX(collected_at) FROM user_usage"
+        ).fetchone()
     return row[0] if row and row[0] else None
 
 
-def top_gpu_users(conn: sqlite3.Connection, top: int = 20) -> list[dict]:
+def top_gpu_users(conn: sqlite3.Connection, top: int = 20,
+                  cluster: str | None = None) -> list[dict]:
     """Top users ranked by total GPU-minutes, enriched with active job info."""
-    ts = _latest_collected_at(conn)
+    ts = _latest_collected_at(conn, cluster=cluster)
     if ts is None:
         return []
     # Base: sshare GPU usage
+    params: list = [ts]
+    cluster_filter = ""
+    if cluster:
+        cluster_filter = " AND cluster = ?"
+        params.append(cluster)
+    params.append(top)
     rows = conn.execute(
-        """SELECT user, account, gpu_tres_mins, cpu_tres_mins,
+        f"""SELECT user, account, gpu_tres_mins, cpu_tres_mins,
                   fairshare, gpu_type_mins
            FROM user_usage
-           WHERE collected_at = ? AND gpu_tres_mins > 0
+           WHERE collected_at = ?{cluster_filter} AND gpu_tres_mins > 0
            ORDER BY gpu_tres_mins DESC
            LIMIT ?""",
-        (ts, top),
+        params,
     ).fetchall()
     results = [dict(r) for r in rows]
 
@@ -59,38 +73,52 @@ def top_gpu_users(conn: sqlite3.Connection, top: int = 20) -> list[dict]:
     return results
 
 
-def top_cpu_users(conn: sqlite3.Connection, top: int = 20) -> list[dict]:
+def top_cpu_users(conn: sqlite3.Connection, top: int = 20,
+                  cluster: str | None = None) -> list[dict]:
     """Top users ranked by total CPU-minutes (from latest sshare snapshot)."""
-    ts = _latest_collected_at(conn)
+    ts = _latest_collected_at(conn, cluster=cluster)
     if ts is None:
         return []
+    params: list = [ts]
+    cluster_filter = ""
+    if cluster:
+        cluster_filter = " AND cluster = ?"
+        params.append(cluster)
+    params.append(top)
     rows = conn.execute(
-        """SELECT user, account, cpu_tres_mins, gpu_tres_mins, fairshare
+        f"""SELECT user, account, cpu_tres_mins, gpu_tres_mins, fairshare
            FROM user_usage
-           WHERE collected_at = ? AND cpu_tres_mins > 0
+           WHERE collected_at = ?{cluster_filter} AND cpu_tres_mins > 0
            ORDER BY cpu_tres_mins DESC
            LIMIT ?""",
-        (ts, top),
+        params,
     ).fetchall()
     return [dict(r) for r in rows]
 
 
-def top_gpu_accounts(conn: sqlite3.Connection, top: int = 20) -> list[dict]:
+def top_gpu_accounts(conn: sqlite3.Connection, top: int = 20,
+                     cluster: str | None = None) -> list[dict]:
     """Top accounts ranked by total GPU-minutes."""
-    ts = _latest_collected_at(conn)
+    ts = _latest_collected_at(conn, cluster=cluster)
     if ts is None:
         return []
+    params: list = [ts]
+    cluster_filter = ""
+    if cluster:
+        cluster_filter = " AND cluster = ?"
+        params.append(cluster)
+    params.append(top)
     rows = conn.execute(
-        """SELECT account,
+        f"""SELECT account,
                   SUM(gpu_tres_mins) AS gpu_tres_mins,
                   SUM(cpu_tres_mins) AS cpu_tres_mins,
                   COUNT(*) AS num_users
            FROM user_usage
-           WHERE collected_at = ? AND gpu_tres_mins > 0
+           WHERE collected_at = ?{cluster_filter} AND gpu_tres_mins > 0
            GROUP BY account
            ORDER BY gpu_tres_mins DESC
            LIMIT ?""",
-        (ts, top),
+        params,
     ).fetchall()
     return [dict(r) for r in rows]
 

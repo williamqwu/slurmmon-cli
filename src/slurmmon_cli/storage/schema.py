@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 
-SCHEMA_VERSION = "2"
+SCHEMA_VERSION = "3"
 
 DDL = """
 CREATE TABLE IF NOT EXISTS jobs (
@@ -78,30 +78,42 @@ CREATE TABLE IF NOT EXISTS user_usage (
     fairshare      REAL,
     cpu_tres_mins  INTEGER,
     gpu_tres_mins  INTEGER,
-    gpu_type_mins  TEXT
+    gpu_type_mins  TEXT,
+    cluster        TEXT DEFAULT ''
 );
 
 CREATE INDEX IF NOT EXISTS idx_uu_collected ON user_usage (collected_at);
 CREATE INDEX IF NOT EXISTS idx_uu_user ON user_usage (user);
 CREATE INDEX IF NOT EXISTS idx_uu_gpu ON user_usage (gpu_tres_mins);
+CREATE INDEX IF NOT EXISTS idx_uu_cluster ON user_usage (cluster);
 """
 
 
 def ensure_schema(conn: sqlite3.Connection) -> None:
-    """Create tables if they don't exist and check schema version."""
+    """Create tables if they don't exist and apply migrations."""
     conn.executescript(DDL)
+
     row = conn.execute(
         "SELECT value FROM metadata WHERE key = 'schema_version'"
     ).fetchone()
-    if row is None:
+    current = row[0] if row else None
+
+    # Migration: v2 -> v3: add cluster column to user_usage
+    if current and current < "3":
+        try:
+            conn.execute("ALTER TABLE user_usage ADD COLUMN cluster TEXT DEFAULT ''")
+        except Exception:
+            pass  # column already exists
+        conn.execute("CREATE INDEX IF NOT EXISTS idx_uu_cluster ON user_usage (cluster)")
+
+    if current is None:
         conn.execute(
             "INSERT INTO metadata (key, value) VALUES ('schema_version', ?)",
             (SCHEMA_VERSION,),
         )
-        conn.commit()
-    elif row[0] != SCHEMA_VERSION:
+    elif current != SCHEMA_VERSION:
         conn.execute(
             "UPDATE metadata SET value = ? WHERE key = 'schema_version'",
             (SCHEMA_VERSION,),
         )
-        conn.commit()
+    conn.commit()

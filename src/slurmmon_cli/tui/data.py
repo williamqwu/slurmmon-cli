@@ -154,7 +154,17 @@ def compute_account_node_breakdown(
     return result
 
 
-def fetch_gpu_rankings(db_path: str | None, mode: str, top: int = 20) -> list[dict]:
+def _detect_cluster() -> str:
+    """Detect current cluster name from sinfo."""
+    try:
+        info = get_cluster_info()
+        return info.cluster_name if info else ""
+    except Exception:
+        return ""
+
+
+def fetch_gpu_rankings(db_path: str | None, mode: str, top: int = 20,
+                       cluster: str | None = None) -> list[dict]:
     """Fetch GPU/CPU usage rankings from DB, enriched with live node data."""
     from slurmmon_cli.storage.database import Database
     from slurmmon_cli.analysis.gpu_usage import (
@@ -162,10 +172,14 @@ def fetch_gpu_rankings(db_path: str | None, mode: str, top: int = 20) -> list[di
         top_gpu_requesters, usage_delta,
     )
 
+    # Auto-detect cluster if not provided
+    if cluster is None:
+        cluster = _detect_cluster()
+
     db = Database(db_path)
     with db:
         if mode == "gpu":
-            rows = top_gpu_users(db.conn, top=top)
+            rows = top_gpu_users(db.conn, top=top, cluster=cluster or None)
             # Enrich with live node data
             try:
                 nodes, _ = fetch_node_data()
@@ -180,9 +194,9 @@ def fetch_gpu_rankings(db_path: str | None, mode: str, top: int = 20) -> list[di
                     r["partial_nodes"] = 0
             return rows
         elif mode == "cpu":
-            return top_cpu_users(db.conn, top=top)
+            return top_cpu_users(db.conn, top=top, cluster=cluster or None)
         elif mode == "account":
-            rows = top_gpu_accounts(db.conn, top=top)
+            rows = top_gpu_accounts(db.conn, top=top, cluster=cluster or None)
             # Enrich accounts with job counts and node data
             try:
                 # Job counts per account

@@ -210,7 +210,7 @@ class NodeHeatmap(Widget):
             ("\u2588 50-80%", _YELLOW), (" ", Style()),
             ("\u2588<50%", _RED), (" ", Style()),
             ("\u2588idle", _GRAY),
-            ("  \u250c\u2500\u2510=excl ", Style(bold=True)),
+            ("  \u250c\u2500\u2510=exclusive(1 user, full node) ", Style(bold=True)),
             (view_label, Style(color="cyan")),
             ("  ", Style()),
             (sort_label, Style(dim=True)),

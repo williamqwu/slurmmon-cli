@@ -164,7 +164,7 @@ def prune_old_usage(db: Database, retention_days: int = 30) -> int:
     return cursor.rowcount
 
 
-def _collect_sshare(db: Database, now: float) -> int:
+def _collect_sshare(db: Database, now: float, cluster: str = "") -> int:
     """Collect sshare data into user_usage table. Returns row count."""
     users = get_sshare()
     if not users:
@@ -172,13 +172,14 @@ def _collect_sshare(db: Database, now: float) -> int:
     db.conn.executemany(
         """INSERT INTO user_usage (
             collected_at, account, user, raw_usage, fairshare,
-            cpu_tres_mins, gpu_tres_mins, gpu_type_mins
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+            cpu_tres_mins, gpu_tres_mins, gpu_type_mins, cluster
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         [
             (
                 now, u.account, u.user, u.raw_usage, u.fairshare,
                 u.cpu_tres_mins, u.gpu_tres_mins,
                 json.dumps(u.gpu_type_mins) if u.gpu_type_mins else None,
+                cluster,
             )
             for u in users
         ],
@@ -219,9 +220,11 @@ def collect_snapshot(db: Database, sshare_interval: int = 1800) -> dict:
     _set_last_collect_time(db, now)
 
     # 4. sshare (gated by interval)
+    cluster_name = cluster_info.cluster_name if cluster_info else ""
+    stats["cluster"] = cluster_name
     last_sshare = _get_metadata_float(db, "last_sshare_time")
     if last_sshare is None or (now - last_sshare) >= sshare_interval:
-        stats["sshare_users"] = _collect_sshare(db, now)
+        stats["sshare_users"] = _collect_sshare(db, now, cluster=cluster_name)
         _set_metadata(db, "last_sshare_time", str(int(now)))
 
     # 5. Prune

@@ -43,6 +43,7 @@ class SlurmmonApp(App):
         self.partition_filter = partition_filter
         self.from_db = from_db
         self.config = config
+        self.cluster_name = ""
 
     def on_mount(self) -> None:
         from slurmmon_cli.tui.screens.monitor import MonitorScreen
@@ -72,7 +73,8 @@ class SlurmmonApp(App):
             db = Database(self.db_path)
             db.connect()
             try:
-                collect_snapshot(db, sshare_interval=sshare_interval)
+                stats = collect_snapshot(db, sshare_interval=sshare_interval)
+                self.cluster_name = stats.get("cluster", "")
             finally:
                 db.close()
         except Exception as exc:

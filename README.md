@@ -31,7 +31,7 @@ slurmmon-cli collect --daemon --interval 300
 # Per-user summary for the last 7 days
 slurmmon-cli users --since 7d
 
-# Queue wait time analysis by hour of day
+# Queue wait time analysis by hour of danny
 slurmmon-cli waits --by-hour --since 7d
 
 # Job efficiency report (low efficiency jobs)
