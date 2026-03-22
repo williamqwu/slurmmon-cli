@@ -10,7 +10,7 @@ from textual.widget import Widget
 from slurmmon_cli.models import NodeUtilization
 
 # Colors for utilization ranges
-_GREEN = Style(color="white", bgcolor="green")
+_GREEN = Style(color="black", bgcolor="green")
 _YELLOW = Style(color="black", bgcolor="yellow")
 _RED = Style(color="white", bgcolor="red")
 _GRAY = Style(color="white", bgcolor="#444444")

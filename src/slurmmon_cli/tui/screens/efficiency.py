@@ -199,7 +199,7 @@ class EfficiencyScreen(Screen):
 
     def _update_waste(self, report: dict) -> None:
         low_eff = report.get("low_efficiency_jobs", [])
-        under_nodes = report.get("underutilized_nodes", [])
+        under_by_part = report.get("underutilized_nodes_by_partition", {})
 
         header = self.query_one("#waste-header", Static)
         header.update(f" Low Efficiency Jobs (CPU eff < 50%): {len(low_eff)} found")
@@ -219,21 +219,35 @@ class EfficiencyScreen(Screen):
                 r.get("state", ""),
             )
 
-        # Underutilized nodes
+        # Underutilized exclusive nodes grouped by partition
         nodes_widget = self.query_one("#waste-nodes", Static)
-        if under_nodes:
-            lines = [f"\n Underutilized Nodes (load ratio < 30%): {len(under_nodes)} found\n\n"]
-            lines.append(f"   {'NODE':<10} {'LOAD%':>6}  {'CPU(alloc/tot)':>15}  {'USERS':<20}\n")
-            for n in under_nodes[:15]:
-                lr = n.get("load_ratio")
-                pct = f"{lr * 100:.0f}%" if lr is not None else "-"
-                cpu = f"{n.get('cpus_alloc', 0)}/{n.get('cpus_total', 0)}"
+        total_count = sum(len(v) for v in under_by_part.values())
+        if total_count > 0:
+            lines = [
+                f"\n Underutilized Exclusive Nodes (load < 30%, single user, full alloc): "
+                f"{total_count} found\n"
+            ]
+            for part_name in sorted(under_by_part.keys()):
+                part_nodes = under_by_part[part_name]
+                lines.append(f"\n   [{part_name}]\n")
                 lines.append(
-                    f"   {n.get('name', '?'):<10} {pct:>6}  {cpu:>15}  {n.get('users', '-'):<20}\n"
+                    f"   {'NODE':<10} {'USER':<12} {'LOAD%':>6}  "
+                    f"{'CPU(a/t)':>10}  {'GPU(a/t)':>10}\n"
                 )
+                for n in part_nodes:
+                    lr = n.get("load_ratio")
+                    pct = f"{lr * 100:.0f}%" if lr is not None else "-"
+                    cpu = f"{n.get('cpus_alloc', 0)}/{n.get('cpus_total', 0)}"
+                    gpu = f"{n.get('gpus_alloc', 0)}/{n.get('gpus_total', 0)}"
+                    lines.append(
+                        f"   {n.get('name', '?'):<10} {n.get('user', '-'):<12} {pct:>6}  "
+                        f"{cpu:>10}  {gpu:>10}\n"
+                    )
             nodes_widget.update("".join(lines))
         else:
-            nodes_widget.update("\n No severely underutilized nodes detected.")
+            nodes_widget.update(
+                "\n No underutilized exclusive nodes detected (all full-alloc nodes have load >= 30%)."
+            )
 
     def action_refresh(self) -> None:
         self._load_all()

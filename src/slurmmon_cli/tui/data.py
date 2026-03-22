@@ -291,7 +291,7 @@ def fetch_cluster_trends(db_path: str | None, limit: int = 100) -> list[dict]:
 
 
 def fetch_waste_report(db_path: str | None) -> dict:
-    """Fetch waste indicators: low-efficiency jobs + underutilized nodes."""
+    """Fetch waste indicators: low-efficiency jobs + underutilized exclusive nodes."""
     from slurmmon_cli.storage.database import Database
     from slurmmon_cli.analysis.efficiency import low_efficiency_jobs
 
@@ -299,18 +299,34 @@ def fetch_waste_report(db_path: str | None) -> dict:
     with db:
         low_eff = low_efficiency_jobs(db.conn, threshold_pct=50.0, limit=20)
 
-    # Underutilized nodes (live)
-    under_nodes = []
+    # Underutilized exclusive (full) nodes, grouped by partition
+    under_by_partition: dict[str, list[dict]] = {}
     try:
         nodes, _ = fetch_node_data()
-        under_nodes = [
-            {"name": n.name, "load_ratio": n.load_ratio,
-             "cpus_alloc": n.cpus_alloc, "cpus_total": n.cpus_total,
-             "users": ",".join(n.users[:3])}
-            for n in nodes
-            if n.cpus_alloc > 0 and n.load_ratio is not None and n.load_ratio < 0.3
-        ]
+        for n in nodes:
+            # Only flag exclusive nodes (single user, >=90% CPUs)
+            is_excl = (
+                len(n.users) == 1
+                and n.cpus_alloc > 0
+                and n.cpus_alloc >= n.cpus_total * 0.9
+            )
+            if not is_excl:
+                continue
+            if n.load_ratio is None or n.load_ratio >= 0.3:
+                continue
+            entry = {
+                "name": n.name, "load_ratio": n.load_ratio,
+                "cpus_alloc": n.cpus_alloc, "cpus_total": n.cpus_total,
+                "gpus_alloc": n.gpus_alloc, "gpus_total": n.gpus_total,
+                "user": n.users[0] if n.users else "-",
+            }
+            # Add to each partition this node belongs to
+            for p in (n.partitions or ["unknown"]):
+                under_by_partition.setdefault(p, []).append(entry)
     except Exception:
         pass
 
-    return {"low_efficiency_jobs": low_eff, "underutilized_nodes": under_nodes}
+    return {
+        "low_efficiency_jobs": low_eff,
+        "underutilized_nodes_by_partition": under_by_partition,
+    }
