@@ -1,0 +1,9 @@
+Account|User|RawShares|NormShares|RawUsage|NormUsage|EffectvUsage|FairShare|LevelFS|GrpTRESMins|TRESRunMins
+root|||0.000000|20911283859||1.000000||||cpu=118732725,mem=491017521204,energy=0,node=2170859,billing=118732725,gres/gpu=1802898,gres/gpu:a100=1802898
+ root|root|1|0.111111|0|0.000000|0.000000|1.000000|inf||cpu=0,mem=0,energy=0,node=0,billing=0,gres/gpu=0,gres/gpu:a100=0
+ academic||1|0.111111|3357161261|0.160542|0.160542||0.692098||cpu=61915687,mem=268500119481,energy=0,node=1416738,billing=61915687,gres/gpu=669967,gres/gpu:a100=669967
+  pas2979||1|0.333333|0|0.000000|0.000000||inf||cpu=0,mem=0,energy=0,node=0,billing=0,gres/gpu=0,gres/gpu:a100=0
+   pas2979|alice|1|0.142857|61915687|0.064774|0.072903|0.512543|0.048817||cpu=61915687,mem=268500119481,energy=0,node=1557,billing=61915687,gres/gpu=669967,gres/gpu:a100=669967
+   pas1186|bob|1|0.142857|45230100|0.047318|0.053245|0.621000|0.066912||cpu=45230100,mem=195000000000,energy=0,node=1100,billing=45230100,gres/gpu=505800,gres/gpu:a100=505800
+   pas2979|charlie|1|0.142857|1200000|0.001255|0.001413|0.890000|0.891234||cpu=1200000,mem=5000000000,energy=0,node=30,billing=1200000,gres/gpu=0,gres/gpu:a100=0
+   pas1186|dave|1|0.142857|0|0.000000|0.000000|0.912835|inf||cpu=0,mem=0,energy=0,node=0,billing=0,gres/gpu=0,gres/gpu:a100=0

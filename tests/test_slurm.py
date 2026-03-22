@@ -11,8 +11,10 @@ from slurmmon_cli.slurm import (
     get_osc_seff,
     get_queue,
     get_job_history,
+    get_sshare,
     parse_mem_mb,
     parse_tres_gpus,
+    parse_tres_string,
 )
 
 
@@ -269,3 +271,62 @@ class TestGetJobEfficiencyAuto:
         assert eff.gpu_efficiency_pct is not None
         assert abs(eff.gpu_efficiency_pct - 83.33) < 0.01
         assert eff.num_gpus == 2
+
+
+class TestParseTresString:
+    def test_basic(self):
+        result = parse_tres_string("cpu=100,mem=200,gres/gpu=50")
+        assert result == {"cpu": 100, "mem": 200, "gres/gpu": 50}
+
+    def test_with_gpu_types(self):
+        result = parse_tres_string(
+            "cpu=100,gres/gpu=50,gres/gpu:a100=50"
+        )
+        assert result["gres/gpu"] == 50
+        assert result["gres/gpu:a100"] == 50
+
+    def test_empty(self):
+        assert parse_tres_string("") == {}
+        assert parse_tres_string(None) == {}
+
+    def test_full_sshare_tres(self):
+        tres = "cpu=61915687,mem=268500119481,energy=0,node=1557,billing=61915687,gres/gpu=669967,gres/gpu:a100=669967"
+        result = parse_tres_string(tres)
+        assert result["cpu"] == 61915687
+        assert result["gres/gpu"] == 669967
+        assert result["gres/gpu:a100"] == 669967
+
+
+class TestGetSshare:
+    def test_parses_users(self, mock_slurm):
+        users = get_sshare()
+        # Fixture has alice, bob, charlie with non-zero usage; dave has zero
+        assert len(users) == 3
+        names = {u.user for u in users}
+        assert "alice" in names
+        assert "bob" in names
+        assert "charlie" in names
+        assert "dave" not in names  # zero usage, skipped
+
+    def test_alice_fields(self, mock_slurm):
+        users = get_sshare()
+        alice = next(u for u in users if u.user == "alice")
+        assert alice.account == "pas2979"
+        assert alice.raw_usage == 61915687
+        assert abs(alice.fairshare - 0.512543) < 0.001
+        assert alice.cpu_tres_mins == 61915687
+        assert alice.gpu_tres_mins == 669967
+        assert alice.gpu_type_mins == {"a100": 669967}
+
+    def test_charlie_no_gpu(self, mock_slurm):
+        users = get_sshare()
+        charlie = next(u for u in users if u.user == "charlie")
+        assert charlie.gpu_tres_mins == 0
+        assert charlie.gpu_type_mins == {}
+
+    def test_skips_account_rows(self, mock_slurm):
+        """Rows with empty User field should be skipped."""
+        users = get_sshare()
+        # No entry for account-level rows like "academic" or "pas2979"
+        for u in users:
+            assert u.user != ""

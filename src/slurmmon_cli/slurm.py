@@ -8,7 +8,7 @@ import re
 import subprocess
 from typing import Any
 
-from slurmmon_cli.models import ClusterInfo, Job, JobEfficiency, PartitionInfo
+from slurmmon_cli.models import ClusterInfo, Job, JobEfficiency, PartitionInfo, UserUsage
 
 log = logging.getLogger(__name__)
 
@@ -652,3 +652,121 @@ def get_job_efficiency_auto(job_id: str, osc: bool = False) -> JobEfficiency | N
         if eff is not None:
             return eff
     return get_job_efficiency(job_id)
+
+
+# ---------------------------------------------------------------------------
+# sshare - aggregate user/account usage
+# ---------------------------------------------------------------------------
+
+def parse_tres_string(tres: str) -> dict[str, int]:
+    """Parse a Slurm TRES string like ``cpu=N,mem=N,...,gres/gpu=N``.
+
+    Returns a dict mapping TRES keys to integer values.
+    """
+    result: dict[str, int] = {}
+    if not tres or not isinstance(tres, str):
+        return result
+    for pair in tres.split(","):
+        parts = pair.split("=", 1)
+        if len(parts) != 2:
+            continue
+        key = parts[0].strip()
+        try:
+            result[key] = int(parts[1].strip())
+        except ValueError:
+            pass
+    return result
+
+
+def get_sshare() -> list[UserUsage]:
+    """Fetch per-user usage data via ``sshare -a -l --parsable2``.
+
+    Returns UserUsage objects for users with non-zero usage.
+    Skips account-level aggregate rows (empty User field).
+    """
+    try:
+        result = subprocess.run(
+            ["sshare", "-a", "-l", "--parsable2"],
+            capture_output=True, text=True, timeout=60,
+        )
+        if result.returncode != 0:
+            log.warning("sshare failed (rc=%d): %s", result.returncode, result.stderr.strip())
+            return []
+    except (subprocess.TimeoutExpired, OSError) as exc:
+        log.warning("sshare failed: %s", exc)
+        return []
+
+    lines = result.stdout.splitlines()
+    if not lines:
+        return []
+
+    # First line is header
+    header = lines[0].split("|")
+    # Find column indices
+    col_map: dict[str, int] = {}
+    for i, name in enumerate(header):
+        col_map[name.strip()] = i
+
+    needed = {"Account", "User", "RawUsage", "FairShare", "TRESRunMins"}
+    if not needed.issubset(col_map.keys()):
+        log.warning("sshare header missing expected columns: %s", needed - col_map.keys())
+        return []
+
+    i_account = col_map["Account"]
+    i_user = col_map["User"]
+    i_raw = col_map["RawUsage"]
+    i_fair = col_map["FairShare"]
+    i_tres = col_map["TRESRunMins"]
+
+    users: list[UserUsage] = []
+    for line in lines[1:]:
+        fields = line.split("|")
+        if len(fields) <= max(i_account, i_user, i_raw, i_fair, i_tres):
+            continue
+
+        user = fields[i_user].strip()
+        if not user:
+            continue  # skip account-level rows
+
+        account = fields[i_account].strip()
+
+        # Parse RawUsage
+        try:
+            raw_usage = int(fields[i_raw].strip())
+        except (ValueError, IndexError):
+            raw_usage = 0
+
+        # Parse FairShare
+        try:
+            fair_str = fields[i_fair].strip()
+            fairshare = float(fair_str) if fair_str and fair_str != "inf" else None
+        except ValueError:
+            fairshare = None
+
+        # Parse TRESRunMins
+        tres = parse_tres_string(fields[i_tres].strip())
+        cpu_mins = tres.get("cpu", 0)
+        gpu_mins = tres.get("gres/gpu", 0)
+
+        # Skip users with zero usage everywhere
+        if raw_usage == 0 and cpu_mins == 0 and gpu_mins == 0:
+            continue
+
+        # Extract per-GPU-type minutes
+        gpu_type_mins: dict[str, int] = {}
+        for key, val in tres.items():
+            if key.startswith("gres/gpu:") and val > 0:
+                gpu_type = key.split(":", 1)[1]
+                gpu_type_mins[gpu_type] = val
+
+        users.append(UserUsage(
+            account=account,
+            user=user,
+            raw_usage=raw_usage,
+            fairshare=fairshare,
+            cpu_tres_mins=cpu_mins,
+            gpu_tres_mins=gpu_mins,
+            gpu_type_mins=gpu_type_mins,
+        ))
+
+    return users

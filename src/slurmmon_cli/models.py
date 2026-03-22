@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 
 @dataclass(slots=True)
@@ -64,3 +64,14 @@ class JobEfficiency:
     gpu_utilization: str | None = None
     gpu_mem_utilized: str | None = None
     num_gpus: int | None = None
+
+
+@dataclass(slots=True)
+class UserUsage:
+    account: str
+    user: str
+    raw_usage: int                                     # CPU-seconds (all-time)
+    fairshare: float | None
+    cpu_tres_mins: int                                 # from TRESRunMins
+    gpu_tres_mins: int                                 # gres/gpu from TRESRunMins
+    gpu_type_mins: dict[str, int] = field(default_factory=dict)  # {"a100": N}
