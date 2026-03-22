@@ -83,10 +83,12 @@ class MonitorScreen(Screen):
         summary = self.query_one("#cluster-summary", ClusterSummary)
         summary.update_data(info, len(running), len(pending))
 
-        # Update subtitle with timestamp and set app cluster_name
-        cluster_name = info.cluster_name if info else "unknown"
-        if cluster_name and cluster_name != "unknown":
-            self.app.cluster_name = cluster_name
+        # Update subtitle - prefer app's detected cluster_name over sinfo's
+        cluster_name = getattr(self.app, "cluster_name", "") or ""
+        if not cluster_name and info and info.cluster_name:
+            cluster_name = info.cluster_name
+        if not cluster_name:
+            cluster_name = "detecting..."
         self.app.sub_title = f"{cluster_name} | {time.strftime('%H:%M:%S')}"
 
         # Partition table

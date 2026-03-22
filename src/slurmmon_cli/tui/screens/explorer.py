@@ -69,6 +69,11 @@ class ExplorerScreen(Screen):
         )
         at.cursor_type = "row"
 
+        # Don't load immediately - wait for screen_resume or manual refresh
+        # _initial_collect may not have finished populating DB yet
+
+    def on_screen_resume(self) -> None:
+        """Reload data when user switches to this screen."""
         self._load_all_tabs()
 
     def _get_cluster(self) -> str | None:

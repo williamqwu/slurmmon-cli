@@ -46,6 +46,10 @@ class EfficiencyScreen(Screen):
         wt.add_columns("JOBID", "USER", "PARTITION", "CPUS", "CPU EFF", "MEM EFF", "STATE")
         wt.cursor_type = "row"
 
+        # Don't load immediately - data may not be collected yet
+
+    def on_screen_resume(self) -> None:
+        """Reload data when user switches to this screen."""
         self._load_all()
 
     def _load_all(self) -> None:
