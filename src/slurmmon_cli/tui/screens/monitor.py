@@ -8,7 +8,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.screen import Screen
 from textual.widgets import DataTable, Footer, Header, Static
-from textual.worker import Worker, work
+from textual import work
 
 from slurmmon_cli.tui.formatting import format_duration, format_mem
 from slurmmon_cli.tui.widgets.cluster_summary import ClusterSummary

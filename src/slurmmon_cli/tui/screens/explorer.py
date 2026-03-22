@@ -8,7 +8,7 @@ from textual.app import ComposeResult
 from textual.binding import Binding
 from textual.screen import Screen
 from textual.widgets import DataTable, Footer, Header, Static, TabbedContent, TabPane
-from textual.worker import work
+from textual import work
 
 from slurmmon_cli.tui.widgets.node_heatmap import NodeHeatmap
 from slurmmon_cli.tui.widgets.gpu_chart import GpuChart
