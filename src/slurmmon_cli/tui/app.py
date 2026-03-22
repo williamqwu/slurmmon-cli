@@ -46,10 +46,6 @@ class SlurmmonApp(App):
         self.cluster_name = ""
 
     def on_mount(self) -> None:
-        # Detect cluster synchronously before installing screens
-        # so Explorer has the cluster name immediately
-        self._detect_cluster_sync()
-
         from slurmmon_cli.tui.screens.monitor import MonitorScreen
         from slurmmon_cli.tui.screens.explorer import ExplorerScreen
         from slurmmon_cli.tui.screens.efficiency import EfficiencyScreen
@@ -61,28 +57,40 @@ class SlurmmonApp(App):
         self.install_screen(SettingsScreen(), name="settings")
         self.push_screen("monitor")
 
-        # Background collection so Explorer tabs have data on first visit
+        # Detect cluster + collect in background
         if not self.from_db:
             self._initial_collect()
 
-    def _detect_cluster_sync(self) -> None:
-        """Detect cluster name synchronously from sinfo."""
-        try:
-            from slurmmon_cli.slurm import get_cluster_info
-            info = get_cluster_info()
-            if info and info.cluster_name and info.cluster_name != "unknown":
-                self.cluster_name = info.cluster_name
-                self.sub_title = self.cluster_name
-        except Exception:
-            pass
-
     @work(thread=True)
     def _initial_collect(self) -> None:
-        """Run one collect cycle in background to populate the DB."""
+        """Detect cluster and run one collect cycle in background."""
         try:
+            from slurmmon_cli.slurm import get_cluster_info, run_slurm_command
             from slurmmon_cli.storage.collector import collect_snapshot
             from slurmmon_cli.storage.database import Database
 
+            # Detect cluster (try sinfo first, then scontrol)
+            info = get_cluster_info()
+            if info and info.cluster_name and info.cluster_name != "unknown":
+                self.cluster_name = info.cluster_name
+            if not self.cluster_name:
+                # Fallback: try scontrol for cluster name
+                try:
+                    import subprocess, json as _json
+                    result = subprocess.run(
+                        ["scontrol", "show", "config"],
+                        capture_output=True, text=True, timeout=10,
+                    )
+                    for line in result.stdout.splitlines():
+                        if line.strip().startswith("ClusterName"):
+                            self.cluster_name = line.split("=", 1)[1].strip()
+                            break
+                except Exception:
+                    pass
+            if self.cluster_name:
+                self.sub_title = self.cluster_name
+
+            # Then collect
             cfg = self.config
             sshare_interval = int(cfg.get("general", "sshare_interval")) if cfg else 1800
             db = Database(self.db_path)
@@ -91,6 +99,8 @@ class SlurmmonApp(App):
                 stats = collect_snapshot(db, sshare_interval=sshare_interval)
                 if not self.cluster_name:
                     self.cluster_name = stats.get("cluster", "")
+                    if self.cluster_name:
+                        self.sub_title = self.cluster_name
             finally:
                 db.close()
         except Exception as exc:

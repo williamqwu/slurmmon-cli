@@ -83,8 +83,10 @@ class MonitorScreen(Screen):
         summary = self.query_one("#cluster-summary", ClusterSummary)
         summary.update_data(info, len(running), len(pending))
 
-        # Update subtitle with timestamp
+        # Update subtitle with timestamp and set app cluster_name
         cluster_name = info.cluster_name if info else "unknown"
+        if cluster_name and cluster_name != "unknown":
+            self.app.cluster_name = cluster_name
         self.app.sub_title = f"{cluster_name} | {time.strftime('%H:%M:%S')}"
 
         # Partition table

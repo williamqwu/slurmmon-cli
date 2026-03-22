@@ -13,25 +13,16 @@ from textual import work
 from slurmmon_cli.tui.widgets.node_heatmap import NodeHeatmap
 from slurmmon_cli.tui.widgets.gpu_chart import GpuChart
 
-# Tab-specific key hints
-_TAB_HINTS = {
-    "tab-gpu": " Keys: [r] refresh",
-    "tab-cpu": " Keys: [r] refresh",
-    "tab-accounts": " Keys: [r] refresh",
-    "tab-nodes": " Keys: [r] refresh  [o] sort  [v] view mode  [p] partition  [arrows] navigate  [enter] detail",
-    "tab-chart": " Keys: [r] refresh  [c] chart mode",
-}
-
 
 class ExplorerScreen(Screen):
     """GPU and resource usage explorer with tabbed analysis views."""
 
     BINDINGS = [
-        Binding("r", "refresh", "Refresh", show=False),
-        Binding("o", "cycle_sort", "Sort", show=False),
-        Binding("v", "cycle_view", "View", show=False),
-        Binding("p", "cycle_partition", "Partition", show=False),
-        Binding("c", "cycle_chart", "Chart", show=False),
+        Binding("r", "refresh", "Refresh", show=True),
+        Binding("o", "cycle_sort", "Sort nodes", show=True),
+        Binding("v", "cycle_view", "Node view", show=True),
+        Binding("p", "cycle_partition", "Partition", show=True),
+        Binding("c", "cycle_chart", "Chart mode", show=True),
     ]
 
     def compose(self) -> ComposeResult:
@@ -41,7 +32,7 @@ class ExplorerScreen(Screen):
                 yield DataTable(id="gpu-table")
                 yield Static(
                     " FAIRSHARE: Slurm scheduling priority (0-1). "
-                    "Higher = higher priority. Based on fair share of resources vs recent usage.",
+                    "Higher = higher priority.",
                     id="fairshare-note",
                 )
             with TabPane("CPU Users", id="tab-cpu"):
@@ -49,17 +40,15 @@ class ExplorerScreen(Screen):
             with TabPane("Accounts", id="tab-accounts"):
                 yield DataTable(id="account-table")
             with TabPane("Nodes", id="tab-nodes"):
+                yield Static(
+                    " Keys: [o]sort [v]view [p]partition [arrows]navigate [enter]detail",
+                    id="nodes-hint",
+                )
                 yield NodeHeatmap(id="node-heatmap")
             with TabPane("GPU Chart", id="tab-chart"):
+                yield Static(" Keys: [c] switch metric", id="chart-hint")
                 yield GpuChart(id="gpu-chart")
-        yield Static(_TAB_HINTS.get("tab-gpu", ""), id="tab-hints")
         yield Footer()
-
-    def on_tabbed_content_tab_activated(self, event) -> None:
-        """Update hint bar when tab changes."""
-        tab_id = event.pane.id if hasattr(event, "pane") else ""
-        hint = _TAB_HINTS.get(tab_id, " Keys: [r] refresh")
-        self.query_one("#tab-hints", Static).update(hint)
 
     def on_mount(self) -> None:
         gt = self.query_one("#gpu-table", DataTable)

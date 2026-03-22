@@ -42,12 +42,11 @@ Screen {
     padding: 0 1;
 }
 
-#tab-hints {
+#nodes-hint, #chart-hint {
     height: 1;
-    dock: bottom;
-    color: $text;
+    color: $text-muted;
     background: $surface;
-    padding: 0 1;
+    padding: 0 0;
 }
 
 /* Efficiency */
