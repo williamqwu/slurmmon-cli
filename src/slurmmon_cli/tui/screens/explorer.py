@@ -39,7 +39,7 @@ class ExplorerScreen(Screen):
     def on_mount(self) -> None:
         # GPU users table
         gt = self.query_one("#gpu-table", DataTable)
-        gt.add_columns("#", "USER", "ACCOUNT", "GPU-HOURS", "FAIRSHARE", "GPU TYPES")
+        gt.add_columns("#", "USER", "ACCOUNT", "GPU-HOURS", "JOBS(R/P)", "NODES", "FAIRSHARE", "GPU TYPES")
         gt.cursor_type = "row"
 
         # CPU users table
@@ -74,8 +74,12 @@ class ExplorerScreen(Screen):
             gpu_hrs = r.get("gpu_tres_mins", 0) // 60
             fair = f"{r['fairshare']:.2f}" if r.get("fairshare") is not None else "-"
             types = self._format_gpu_types(r.get("gpu_type_mins"))
+            jr = r.get("gpu_jobs_running", 0)
+            jp = r.get("gpu_jobs_pending", 0)
+            jobs_str = f"{jr}/{jp}"
+            nodes = str(r.get("gpu_node_count", 0))
             gt.add_row(str(i), r.get("user", "?"), r.get("account", "-"),
-                       f"{gpu_hrs:,}", fair, types)
+                       f"{gpu_hrs:,}", jobs_str, nodes, fair, types)
 
         # Also update chart
         chart = self.query_one("#gpu-chart", GpuChart)
@@ -124,7 +128,7 @@ class ExplorerScreen(Screen):
         heatmap = self.query_one("#node-heatmap", NodeHeatmap)
         allocated = [n for n in nodes if n.cpus_alloc > 0]
         allocated.sort(key=lambda n: n.load_ratio if n.load_ratio is not None else 999)
-        heatmap.set_data(allocated)
+        heatmap.set_data(allocated, show_users=True)
 
     @staticmethod
     def _format_gpu_types(gpu_type_mins_str: str | None) -> str:

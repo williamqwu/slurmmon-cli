@@ -15,10 +15,11 @@ def _latest_collected_at(conn: sqlite3.Connection) -> float | None:
 
 
 def top_gpu_users(conn: sqlite3.Connection, top: int = 20) -> list[dict]:
-    """Top users ranked by total GPU-minutes (from latest sshare snapshot)."""
+    """Top users ranked by total GPU-minutes, enriched with active job info."""
     ts = _latest_collected_at(conn)
     if ts is None:
         return []
+    # Base: sshare GPU usage
     rows = conn.execute(
         """SELECT user, account, gpu_tres_mins, cpu_tres_mins,
                   fairshare, gpu_type_mins
@@ -28,7 +29,34 @@ def top_gpu_users(conn: sqlite3.Connection, top: int = 20) -> list[dict]:
            LIMIT ?""",
         (ts, top),
     ).fetchall()
-    return [dict(r) for r in rows]
+    results = [dict(r) for r in rows]
+
+    # Enrich with active GPU job counts and node counts from jobs table
+    active = conn.execute(
+        """SELECT user,
+                  SUM(CASE WHEN state = 'RUNNING' THEN 1 ELSE 0 END) AS gpu_jobs_running,
+                  SUM(CASE WHEN state = 'PENDING' THEN 1 ELSE 0 END) AS gpu_jobs_pending,
+                  GROUP_CONCAT(DISTINCT CASE WHEN state = 'RUNNING' THEN node_list END) AS gpu_nodes
+           FROM jobs
+           WHERE num_gpus > 0 AND state IN ('RUNNING', 'PENDING')
+           GROUP BY user"""
+    ).fetchall()
+    active_map = {r["user"]: dict(r) for r in active}
+
+    for row in results:
+        info = active_map.get(row["user"], {})
+        row["gpu_jobs_running"] = info.get("gpu_jobs_running", 0)
+        row["gpu_jobs_pending"] = info.get("gpu_jobs_pending", 0)
+        # Count distinct nodes from comma-joined node_list
+        raw_nodes = info.get("gpu_nodes") or ""
+        node_set = set()
+        for part in raw_nodes.split(","):
+            part = part.strip()
+            if part:
+                node_set.add(part)
+        row["gpu_node_count"] = len(node_set)
+
+    return results
 
 
 def top_cpu_users(conn: sqlite3.Connection, top: int = 20) -> list[dict]:

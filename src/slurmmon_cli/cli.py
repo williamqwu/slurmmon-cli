@@ -436,7 +436,7 @@ def cmd_explore(args: argparse.Namespace) -> None:
         top_nodes = allocated[:args.top]
 
         header = (
-            f"{'NODE':<10} {'STATE':<8} {'USERS':<15} "
+            f"{'':>3} {'NODE':<10} {'STATE':<8} {'USERS':<15} "
             f"{'CPU(load/alloc/tot)':>20} {'LOAD%':>6} "
             f"{'GPU(use/tot)':>12} {'MEM(alloc/tot)':>15}"
         )
@@ -446,6 +446,13 @@ def cmd_explore(args: argparse.Namespace) -> None:
             users_str = ",".join(n.users[:3]) if n.users else "-"
             if len(n.users) > 3:
                 users_str += f"+{len(n.users) - 3}"
+            # Mark exclusive nodes (single user, >=90% CPUs)
+            exclusive = (
+                len(n.users) == 1
+                and n.cpus_alloc > 0
+                and n.cpus_alloc >= n.cpus_total * 0.9
+            )
+            marker = " * " if exclusive else "   "
             cpu_str = f"{n.cpu_load:.1f}/{n.cpus_alloc}/{n.cpus_total}"
             load_pct = f"{n.load_ratio * 100:.0f}%" if n.load_ratio is not None else "-"
             gpu_str = f"{n.gpus_alloc}/{n.gpus_total}"
@@ -455,14 +462,23 @@ def cmd_explore(args: argparse.Namespace) -> None:
             mem_total = _format_mem(n.mem_total_mb)
             mem_str = f"{mem_alloc}/{mem_total}"
             print(
-                f"{n.name:<10} {n.state:<8} {users_str:<15} "
+                f"{marker}{n.name:<10} {n.state:<8} {users_str:<15} "
                 f"{cpu_str:>20} {load_pct:>6} "
                 f"{gpu_str:>12} {mem_str:>15}"
             )
 
+        exclusive_count = sum(
+            1 for n in allocated
+            if len(n.users) == 1 and n.cpus_alloc >= n.cpus_total * 0.9
+        )
         underutil = sum(1 for n in allocated if n.load_ratio is not None and n.load_ratio < 0.5)
+        notes = []
+        if exclusive_count:
+            notes.append(f"{exclusive_count} exclusive-use node(s) marked with *")
         if underutil:
-            print(f"\n{underutil} node(s) with load ratio < 50%")
+            notes.append(f"{underutil} node(s) with load ratio < 50%")
+        if notes:
+            print(f"\n{'; '.join(notes)}")
         return
 
     db = Database(args.db)
@@ -489,14 +505,24 @@ def cmd_explore(args: argparse.Namespace) -> None:
             if not rows:
                 print("No GPU usage data. Run 'slurmmon-cli collect' first.")
                 return
-            header = f"{'#':>3}  {'USER':<15} {'ACCOUNT':<12} {'GPU-HOURS':>10}  {'FAIRSHARE':>10}  {'GPU TYPES':<20}"
+            header = (
+                f"{'#':>3}  {'USER':<15} {'ACCOUNT':<12} {'GPU-HOURS':>10}  "
+                f"{'JOBS(R/P)':>10}  {'NODES':>6}  {'FAIRSHARE':>10}  {'GPU TYPES':<20}"
+            )
             print(header)
             print("-" * len(header))
             for i, r in enumerate(rows, 1):
                 gpu_hrs = r.get("gpu_tres_mins", 0) // 60
                 fair = f"{r['fairshare']:.2f}" if r.get("fairshare") is not None else "-"
                 types = _format_gpu_types(r.get("gpu_type_mins"))
-                print(f"{i:>3}  {r['user']:<15} {(r.get('account') or '-'):<12} {gpu_hrs:>10,}  {fair:>10}  {types:<20}")
+                jr = r.get("gpu_jobs_running", 0)
+                jp = r.get("gpu_jobs_pending", 0)
+                jobs_str = f"{jr}/{jp}"
+                nodes = r.get("gpu_node_count", 0)
+                print(
+                    f"{i:>3}  {r['user']:<15} {(r.get('account') or '-'):<12} {gpu_hrs:>10,}  "
+                    f"{jobs_str:>10}  {nodes:>6}  {fair:>10}  {types:<20}"
+                )
 
         elif args.by == "cpu":
             rows = top_cpu_users(db.conn, top=args.top)
