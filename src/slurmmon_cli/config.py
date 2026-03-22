@@ -12,6 +12,7 @@ DEFAULTS = {
         "db_path": "",
         "refresh_interval": "30",
         "retention_days": "30",
+        "sshare_interval": "1800",
     },
 }
 

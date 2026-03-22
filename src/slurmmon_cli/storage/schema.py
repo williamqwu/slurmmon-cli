@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 
-SCHEMA_VERSION = "1"
+SCHEMA_VERSION = "2"
 
 DDL = """
 CREATE TABLE IF NOT EXISTS jobs (
@@ -68,6 +68,22 @@ CREATE TABLE IF NOT EXISTS metadata (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS user_usage (
+    id             INTEGER PRIMARY KEY AUTOINCREMENT,
+    collected_at   REAL NOT NULL,
+    account        TEXT NOT NULL,
+    user           TEXT NOT NULL,
+    raw_usage      INTEGER,
+    fairshare      REAL,
+    cpu_tres_mins  INTEGER,
+    gpu_tres_mins  INTEGER,
+    gpu_type_mins  TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_uu_collected ON user_usage (collected_at);
+CREATE INDEX IF NOT EXISTS idx_uu_user ON user_usage (user);
+CREATE INDEX IF NOT EXISTS idx_uu_gpu ON user_usage (gpu_tres_mins);
 """
 
 
@@ -80,6 +96,12 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     if row is None:
         conn.execute(
             "INSERT INTO metadata (key, value) VALUES ('schema_version', ?)",
+            (SCHEMA_VERSION,),
+        )
+        conn.commit()
+    elif row[0] != SCHEMA_VERSION:
+        conn.execute(
+            "UPDATE metadata SET value = ? WHERE key = 'schema_version'",
             (SCHEMA_VERSION,),
         )
         conn.commit()

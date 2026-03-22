@@ -2,11 +2,12 @@
 
 from __future__ import annotations
 
+import json
 import logging
 import time
 
-from slurmmon_cli.models import ClusterInfo, Job
-from slurmmon_cli.slurm import get_cluster_info, get_job_history, get_queue
+from slurmmon_cli.models import ClusterInfo, Job, UserUsage
+from slurmmon_cli.slurm import get_cluster_info, get_job_history, get_queue, get_sshare
 from slurmmon_cli.storage.database import Database
 
 log = logging.getLogger(__name__)
@@ -119,6 +120,27 @@ def _set_last_collect_time(db: Database, t: float) -> None:
     db.conn.commit()
 
 
+def _get_metadata_float(db: Database, key: str) -> float | None:
+    row = db.conn.execute(
+        "SELECT value FROM metadata WHERE key = ?", (key,)
+    ).fetchone()
+    if row:
+        try:
+            return float(row[0])
+        except ValueError:
+            return None
+    return None
+
+
+def _set_metadata(db: Database, key: str, value: str) -> None:
+    db.conn.execute(
+        """INSERT INTO metadata (key, value) VALUES (?, ?)
+           ON CONFLICT(key) DO UPDATE SET value = excluded.value""",
+        (key, value),
+    )
+    db.conn.commit()
+
+
 def prune_old_jobs(db: Database, retention_days: int = 30) -> int:
     """Delete jobs older than retention_days. Returns deleted count."""
     cutoff = time.time() - (retention_days * 86400)
@@ -129,10 +151,46 @@ def prune_old_jobs(db: Database, retention_days: int = 30) -> int:
     return cursor.rowcount
 
 
-def collect_snapshot(db: Database) -> dict:
+def prune_old_usage(db: Database, retention_days: int = 30) -> int:
+    """Delete user_usage rows older than retention_days."""
+    cutoff = time.time() - (retention_days * 86400)
+    cursor = db.conn.execute(
+        "DELETE FROM user_usage WHERE collected_at < ?", (cutoff,)
+    )
+    db.conn.commit()
+    return cursor.rowcount
+
+
+def _collect_sshare(db: Database, now: float) -> int:
+    """Collect sshare data into user_usage table. Returns row count."""
+    users = get_sshare()
+    if not users:
+        return 0
+    db.conn.executemany(
+        """INSERT INTO user_usage (
+            collected_at, account, user, raw_usage, fairshare,
+            cpu_tres_mins, gpu_tres_mins, gpu_type_mins
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        [
+            (
+                now, u.account, u.user, u.raw_usage, u.fairshare,
+                u.cpu_tres_mins, u.gpu_tres_mins,
+                json.dumps(u.gpu_type_mins) if u.gpu_type_mins else None,
+            )
+            for u in users
+        ],
+    )
+    db.conn.commit()
+    return len(users)
+
+
+def collect_snapshot(db: Database, sshare_interval: int = 1800) -> dict:
     """Run one collection cycle. Returns summary stats."""
     now = time.time()
-    stats: dict = {"timestamp": now, "queue_jobs": 0, "history_jobs": 0, "pruned": 0}
+    stats: dict = {
+        "timestamp": now, "queue_jobs": 0, "history_jobs": 0,
+        "sshare_users": 0, "pruned": 0,
+    }
 
     # 1. Current queue
     queue_jobs = get_queue()
@@ -157,24 +215,33 @@ def collect_snapshot(db: Database) -> dict:
 
     _set_last_collect_time(db, now)
 
-    # 4. Prune
+    # 4. sshare (gated by interval)
+    last_sshare = _get_metadata_float(db, "last_sshare_time")
+    if last_sshare is None or (now - last_sshare) >= sshare_interval:
+        stats["sshare_users"] = _collect_sshare(db, now)
+        _set_metadata(db, "last_sshare_time", str(int(now)))
+
+    # 5. Prune
     stats["pruned"] = prune_old_jobs(db)
+    prune_old_usage(db)
 
     return stats
 
 
 def run_collector(db_path: str | None = None, interval: int = 300,
-                  daemon: bool = False, retention_days: int = 30) -> None:
+                  daemon: bool = False, retention_days: int = 30,
+                  sshare_interval: int = 1800) -> None:
     """Main collector entry point."""
     db = Database(db_path)
     db.connect()
     try:
         while True:
             try:
-                stats = collect_snapshot(db)
+                stats = collect_snapshot(db, sshare_interval=sshare_interval)
                 log.info(
-                    "Collected: %d queue + %d history jobs, pruned %d",
-                    stats["queue_jobs"], stats["history_jobs"], stats["pruned"],
+                    "Collected: %d queue + %d history jobs, %d sshare users, pruned %d",
+                    stats["queue_jobs"], stats["history_jobs"],
+                    stats["sshare_users"], stats["pruned"],
                 )
             except Exception:
                 log.exception("Collection cycle failed")
