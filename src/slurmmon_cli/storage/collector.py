@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import datetime
 import json
 import logging
 import time
@@ -112,10 +113,12 @@ def _get_last_collect_time(db: Database) -> str:
 
 
 def _set_last_collect_time(db: Database, t: float) -> None:
+    # Store as ISO datetime for sacct --starttime compatibility
+    dt_str = datetime.datetime.fromtimestamp(t).strftime("%Y-%m-%dT%H:%M:%S")
     db.conn.execute(
         """INSERT INTO metadata (key, value) VALUES ('last_collect_time', ?)
            ON CONFLICT(key) DO UPDATE SET value = excluded.value""",
-        (str(int(t)),),
+        (dt_str,),
     )
     db.conn.commit()
 

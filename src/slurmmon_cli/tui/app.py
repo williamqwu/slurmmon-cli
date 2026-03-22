@@ -2,8 +2,13 @@
 
 from __future__ import annotations
 
+import logging
+
 from textual.app import App
 from textual.binding import Binding
+from textual import work
+
+log = logging.getLogger(__name__)
 
 
 class SlurmmonApp(App):
@@ -47,6 +52,28 @@ class SlurmmonApp(App):
         self.install_screen(ExplorerScreen(), name="explorer")
         self.install_screen(SettingsScreen(), name="settings")
         self.push_screen("monitor")
+
+        # Background collection so Explorer tabs have data on first visit
+        if not self.from_db:
+            self._initial_collect()
+
+    @work(thread=True)
+    def _initial_collect(self) -> None:
+        """Run one collect cycle in background to populate the DB."""
+        try:
+            from slurmmon_cli.storage.collector import collect_snapshot
+            from slurmmon_cli.storage.database import Database
+
+            cfg = self.config
+            sshare_interval = int(cfg.get("general", "sshare_interval")) if cfg else 1800
+            db = Database(self.db_path)
+            db.connect()
+            try:
+                collect_snapshot(db, sshare_interval=sshare_interval)
+            finally:
+                db.close()
+        except Exception as exc:
+            log.debug("Initial collection failed: %s", exc)
 
 
 def run_dashboard(
