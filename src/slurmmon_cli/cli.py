@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import sys
 import time
 
@@ -112,6 +113,14 @@ def build_parser() -> argparse.ArgumentParser:
     p_eff.add_argument("--low", type=float, default=50, help="Threshold for low efficiency")
     p_eff.add_argument("--gpu", action="store_true", help="Show detailed GPU breakdown (requires osc=true)")
 
+    # explore
+    p_explore = sub.add_parser("explore", aliases=["x"], help="GPU and resource usage explorer")
+    p_explore.add_argument("--by", default="gpu",
+                           choices=["gpu", "cpu", "account", "requests", "delta"],
+                           help="Ranking dimension (default: gpu)")
+    p_explore.add_argument("--top", type=int, default=20, help="Number of top entries")
+    p_explore.add_argument("--hours", type=int, default=24, help="Delta window in hours (for --by delta)")
+
     # config
     p_cfg = sub.add_parser("config", help="Show or set config values")
     p_cfg_sub = p_cfg.add_subparsers(dest="config_command")
@@ -139,9 +148,12 @@ def cmd_collect(args: argparse.Namespace) -> None:
         level=logging.INFO,
         format="%(asctime)s %(levelname)s %(message)s",
     )
+    cfg = getattr(args, "_config", None)
+    sshare_interval = int(cfg.get("general", "sshare_interval")) if cfg else 1800
     run_collector(
         db_path=args.db, interval=args.interval,
         daemon=args.daemon, retention_days=args.retention,
+        sshare_interval=sshare_interval,
     )
 
 
@@ -373,6 +385,101 @@ def cmd_efficiency(args: argparse.Namespace) -> None:
                 )
 
 
+def _format_gpu_types(gpu_type_mins_str: str | None) -> str:
+    """Format gpu_type_mins JSON into a readable string."""
+    if not gpu_type_mins_str:
+        return "-"
+    try:
+        types = json.loads(gpu_type_mins_str)
+    except (json.JSONDecodeError, TypeError):
+        return "-"
+    if not types:
+        return "-"
+    parts = [f"{t}:{v:,}" for t, v in sorted(types.items(), key=lambda x: x[1], reverse=True)]
+    return " ".join(parts)
+
+
+def cmd_explore(args: argparse.Namespace) -> None:
+    from slurmmon_cli.storage.database import Database
+    from slurmmon_cli.analysis.gpu_usage import (
+        top_gpu_users, top_cpu_users, top_gpu_accounts,
+        top_gpu_requesters, usage_delta,
+    )
+
+    db = Database(args.db)
+
+    if args.by == "requests":
+        # Live squeue data - works even without sshare collection
+        with db:
+            rows = top_gpu_requesters(db.conn, top=args.top)
+        if not rows:
+            print("No GPU jobs found in queue.")
+            return
+        header = f"{'#':>3}  {'USER':<15} {'ACCOUNT':<12} {'GPUS(R/P)':>10}  {'PARTITIONS':<20}"
+        print(header)
+        print("-" * len(header))
+        for i, r in enumerate(rows, 1):
+            rp = f"{r.get('gpus_running', 0)}/{r.get('gpus_pending', 0)}"
+            parts = r.get("partitions") or "-"
+            print(f"{i:>3}  {r['user']:<15} {(r.get('account') or '-'):<12} {rp:>10}  {parts:<20}")
+        return
+
+    with db:
+        if args.by == "gpu":
+            rows = top_gpu_users(db.conn, top=args.top)
+            if not rows:
+                print("No GPU usage data. Run 'slurmmon-cli collect' first.")
+                return
+            header = f"{'#':>3}  {'USER':<15} {'ACCOUNT':<12} {'GPU-HOURS':>10}  {'FAIRSHARE':>10}  {'GPU TYPES':<20}"
+            print(header)
+            print("-" * len(header))
+            for i, r in enumerate(rows, 1):
+                gpu_hrs = r.get("gpu_tres_mins", 0) // 60
+                fair = f"{r['fairshare']:.2f}" if r.get("fairshare") is not None else "-"
+                types = _format_gpu_types(r.get("gpu_type_mins"))
+                print(f"{i:>3}  {r['user']:<15} {(r.get('account') or '-'):<12} {gpu_hrs:>10,}  {fair:>10}  {types:<20}")
+
+        elif args.by == "cpu":
+            rows = top_cpu_users(db.conn, top=args.top)
+            if not rows:
+                print("No CPU usage data. Run 'slurmmon-cli collect' first.")
+                return
+            header = f"{'#':>3}  {'USER':<15} {'ACCOUNT':<12} {'CPU-HOURS':>10}  {'GPU-HOURS':>10}  {'FAIRSHARE':>10}"
+            print(header)
+            print("-" * len(header))
+            for i, r in enumerate(rows, 1):
+                cpu_hrs = r.get("cpu_tres_mins", 0) // 60
+                gpu_hrs = r.get("gpu_tres_mins", 0) // 60
+                fair = f"{r['fairshare']:.2f}" if r.get("fairshare") is not None else "-"
+                print(f"{i:>3}  {r['user']:<15} {(r.get('account') or '-'):<12} {cpu_hrs:>10,}  {gpu_hrs:>10,}  {fair:>10}")
+
+        elif args.by == "account":
+            rows = top_gpu_accounts(db.conn, top=args.top)
+            if not rows:
+                print("No GPU usage data. Run 'slurmmon-cli collect' first.")
+                return
+            header = f"{'#':>3}  {'ACCOUNT':<20} {'GPU-HOURS':>10}  {'CPU-HOURS':>10}  {'USERS':>6}"
+            print(header)
+            print("-" * len(header))
+            for i, r in enumerate(rows, 1):
+                gpu_hrs = r.get("gpu_tres_mins", 0) // 60
+                cpu_hrs = r.get("cpu_tres_mins", 0) // 60
+                print(f"{i:>3}  {r['account']:<20} {gpu_hrs:>10,}  {cpu_hrs:>10,}  {r.get('num_users', 0):>6}")
+
+        elif args.by == "delta":
+            rows = usage_delta(db.conn, hours=args.hours)
+            if not rows:
+                print(f"No delta data. Need at least 2 sshare snapshots {args.hours}h apart.")
+                return
+            header = f"{'#':>3}  {'USER':<15} {'ACCOUNT':<12} {'GPU-HRS DELTA':>14}  {'GPU-HRS TOTAL':>14}"
+            print(header)
+            print("-" * len(header))
+            for i, r in enumerate(rows, 1):
+                delta_hrs = r.get("gpu_delta", 0) // 60
+                total_hrs = r.get("gpu_total", 0) // 60
+                print(f"{i:>3}  {r['user']:<15} {(r.get('account') or '-'):<12} {delta_hrs:>14,}  {total_hrs:>14,}")
+
+
 def cmd_config(args: argparse.Namespace) -> None:
     from slurmmon_cli.config import load_config
 
@@ -411,6 +518,7 @@ def cmd_db(args: argparse.Namespace) -> None:
 
             oldest = db.conn.execute("SELECT MIN(submit_time) FROM jobs").fetchone()[0]
             newest = db.conn.execute("SELECT MAX(last_seen) FROM jobs").fetchone()[0]
+            usage = db.conn.execute("SELECT COUNT(*) FROM user_usage").fetchone()[0]
 
         db_size = os.path.getsize(db.db_path) if os.path.exists(db.db_path) else 0
         print(f"Database: {db.db_path}")
@@ -418,6 +526,7 @@ def cmd_db(args: argparse.Namespace) -> None:
         print(f"Jobs:     {jobs}")
         print(f"Snapshots: {snaps}")
         print(f"Partitions: {parts}")
+        print(f"Usage rows: {usage}")
         if oldest:
             import datetime
             print(f"Oldest job: {datetime.datetime.fromtimestamp(oldest):%Y-%m-%d %H:%M}")
@@ -462,6 +571,7 @@ def main(argv: list[str] | None = None) -> None:
         "users": cmd_users,
         "waits": cmd_waits,
         "efficiency": cmd_efficiency,
+        "explore": cmd_explore, "x": cmd_explore,
         "config": cmd_config,
         "db": cmd_db,
     }
