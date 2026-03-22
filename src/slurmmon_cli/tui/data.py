@@ -155,12 +155,15 @@ def compute_account_node_breakdown(
 
 
 def _detect_cluster() -> str:
-    """Detect current cluster name from sinfo."""
+    """Detect current cluster name from scontrol (lightweight, single node query)."""
     try:
+        # Use sinfo which is already cached in many cases
         info = get_cluster_info()
-        return info.cluster_name if info else ""
+        if info and info.cluster_name and info.cluster_name != "unknown":
+            return info.cluster_name
     except Exception:
-        return ""
+        pass
+    return ""
 
 
 def fetch_gpu_rankings(db_path: str | None, mode: str, top: int = 20,

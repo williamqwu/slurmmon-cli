@@ -75,11 +75,14 @@ class ExplorerScreen(Screen):
         self._load_account_data()
         self._load_node_data()
 
+    def _get_cluster(self) -> str | None:
+        return getattr(self.app, "cluster_name", None) or None
+
     @work(thread=True)
     def _load_gpu_data(self) -> None:
         from slurmmon_cli.tui.data import fetch_gpu_rankings
         db_path = getattr(self.app, "db_path", None)
-        rows = fetch_gpu_rankings(db_path, "gpu", top=30)
+        rows = fetch_gpu_rankings(db_path, "gpu", top=30, cluster=self._get_cluster())
         self.app.call_from_thread(self._update_gpu_table, rows)
 
     def _update_gpu_table(self, rows: list[dict]) -> None:
@@ -106,7 +109,7 @@ class ExplorerScreen(Screen):
     def _load_cpu_data(self) -> None:
         from slurmmon_cli.tui.data import fetch_gpu_rankings
         db_path = getattr(self.app, "db_path", None)
-        rows = fetch_gpu_rankings(db_path, "cpu", top=30)
+        rows = fetch_gpu_rankings(db_path, "cpu", top=30, cluster=self._get_cluster())
         self.app.call_from_thread(self._update_cpu_table, rows)
 
     def _update_cpu_table(self, rows: list[dict]) -> None:
@@ -123,7 +126,7 @@ class ExplorerScreen(Screen):
     def _load_account_data(self) -> None:
         from slurmmon_cli.tui.data import fetch_gpu_rankings
         db_path = getattr(self.app, "db_path", None)
-        rows = fetch_gpu_rankings(db_path, "account", top=30)
+        rows = fetch_gpu_rankings(db_path, "account", top=30, cluster=self._get_cluster())
         self.app.call_from_thread(self._update_account_table, rows)
 
     def _update_account_table(self, rows: list[dict]) -> None:

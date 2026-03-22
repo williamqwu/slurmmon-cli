@@ -104,6 +104,41 @@ def _safe_str(val: Any) -> str | None:
     return str(val)
 
 
+def _parse_squeue_elapsed(raw: dict) -> int | None:
+    """Extract elapsed seconds from squeue JSON.
+
+    Handles multiple formats:
+    - Direct: {"time": {"set": true, "number": N}}
+    - Nested: {"time": {"elapsed": N, ...}}
+    - Fallback: compute from start_time
+    """
+    import time as _time
+
+    time_val = raw.get("time", raw.get("elapsed_time"))
+    if isinstance(time_val, dict):
+        # Check for nested elapsed key
+        if "elapsed" in time_val:
+            e = _parse_elapsed(time_val["elapsed"])
+            if e is not None:
+                return e
+        # Try as {"set": ..., "number": ...} wrapper
+        e = _parse_elapsed(time_val)
+        if e is not None:
+            return e
+
+    # Direct value
+    e = _parse_elapsed(time_val)
+    if e is not None:
+        return e
+
+    # Fallback: compute from start_time
+    start = _parse_slurm_time(raw.get("start_time"))
+    if start and start > 0:
+        return int(_time.time() - start)
+
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Slurm command runner
 # ---------------------------------------------------------------------------
@@ -198,7 +233,7 @@ def _parse_squeue_job(raw: dict) -> Job:
         start_time=_parse_slurm_time(raw.get("start_time")),
         end_time=None,  # squeue doesn't have end_time
         time_limit_s=time_limit_s,
-        elapsed_s=_parse_elapsed(raw.get("time", raw.get("elapsed_time"))),
+        elapsed_s=_parse_squeue_elapsed(raw),
         node_list=_safe_str(node_list_raw),
         exit_code=None,
         cpu_time_s=None,
