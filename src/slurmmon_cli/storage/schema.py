@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 
-SCHEMA_VERSION = "4"
+SCHEMA_VERSION = "5"
 
 DDL = """
 CREATE TABLE IF NOT EXISTS jobs (
@@ -47,7 +47,9 @@ CREATE TABLE IF NOT EXISTS snapshots (
     total_cpus    INTEGER,
     alloc_cpus    INTEGER,
     running_jobs  INTEGER,
-    pending_jobs  INTEGER
+    pending_jobs  INTEGER,
+    total_gpus    INTEGER DEFAULT 0,
+    alloc_gpus    INTEGER DEFAULT 0
 );
 
 CREATE INDEX IF NOT EXISTS idx_snap_time ON snapshots (timestamp);
@@ -114,7 +116,16 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             conn.execute("ALTER TABLE jobs ADD COLUMN cluster TEXT DEFAULT ''")
             conn.commit()
         except Exception:
-            pass  # column already exists
+            pass
+
+    # Migration: v4 -> v5: add GPU counts to snapshots
+    if current and current < "5":
+        for col in ("total_gpus", "alloc_gpus"):
+            try:
+                conn.execute(f"ALTER TABLE snapshots ADD COLUMN {col} INTEGER DEFAULT 0")
+            except Exception:
+                pass
+        conn.commit()
 
     conn.executescript(DDL)
     # Create cluster indexes (safe now that columns exist)

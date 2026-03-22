@@ -62,6 +62,13 @@ Screen {
     height: 1fr;
 }
 
+#gpu-jobs-hint, #gpu-queue-hint, #gpu-activity-hint, #gpu-waste-hint {
+    height: 1;
+    color: $text-muted;
+    background: $surface;
+    padding: 0 0;
+}
+
 /* Settings */
 SettingsScreen {
     align: center middle;

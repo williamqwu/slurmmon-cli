@@ -8,7 +8,9 @@ import logging
 import time
 
 from slurmmon_cli.models import ClusterInfo, Job, UserUsage
-from slurmmon_cli.slurm import get_cluster_info, get_job_history, get_queue, get_sshare
+from slurmmon_cli.slurm import (
+    get_cluster_info, get_job_history, get_node_utilization, get_queue, get_sshare,
+)
 from slurmmon_cli.storage.database import Database
 
 log = logging.getLogger(__name__)
@@ -58,18 +60,20 @@ def _upsert_jobs(db: Database, jobs: list[Job], now: float,
 
 
 def _insert_snapshot(db: Database, info: ClusterInfo, now: float,
-                     running: int, pending: int) -> None:
+                     running: int, pending: int,
+                     total_gpus: int = 0, alloc_gpus: int = 0) -> None:
     """Insert a cluster-level snapshot row."""
     conn = db.conn
     conn.execute(
         """INSERT INTO snapshots (
             timestamp, total_nodes, idle_nodes, alloc_nodes, down_nodes,
-            mixed_nodes, total_cpus, alloc_cpus, running_jobs, pending_jobs
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            mixed_nodes, total_cpus, alloc_cpus, running_jobs, pending_jobs,
+            total_gpus, alloc_gpus
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             now, info.total_nodes, info.idle_nodes, info.alloc_nodes,
             info.down_nodes, info.mixed_nodes, info.total_cpus,
-            info.alloc_cpus, running, pending,
+            info.alloc_cpus, running, pending, total_gpus, alloc_gpus,
         ),
     )
     conn.commit()
@@ -216,11 +220,19 @@ def collect_snapshot(db: Database, sshare_interval: int = 1800,
         _upsert_jobs(db, queue_jobs, now, cluster=cluster_name)
         stats["queue_jobs"] = len(queue_jobs)
 
-    # 3. Cluster snapshot + partitions
+    # 3. Cluster snapshot + partitions (include GPU counts from node data)
     if cluster_info:
         running = sum(1 for j in queue_jobs if j.state == "RUNNING")
         pending = sum(1 for j in queue_jobs if j.state == "PENDING")
-        _insert_snapshot(db, cluster_info, now, running, pending)
+        total_gpus = alloc_gpus = 0
+        try:
+            for n in get_node_utilization():
+                total_gpus += n.gpus_total
+                alloc_gpus += n.gpus_alloc
+        except Exception:
+            pass
+        _insert_snapshot(db, cluster_info, now, running, pending,
+                         total_gpus=total_gpus, alloc_gpus=alloc_gpus)
         _update_partitions(db, cluster_info, now)
 
     # 4. Recently completed jobs

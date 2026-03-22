@@ -409,3 +409,122 @@ def fetch_waste_report(db_path: str | None) -> dict:
         "low_efficiency_jobs": low_eff,
         "underutilized_nodes_by_partition": under_by_partition,
     }
+
+
+# --- GPU-focused efficiency screen data ---
+
+def fetch_gpu_user_jobs(db_path: str | None, user: str | None = None,
+                        limit: int = 50) -> list[dict]:
+    """Fetch GPU jobs (running + completed) for a user."""
+    from slurmmon_cli.storage.database import Database
+    from slurmmon_cli.analysis.gpu_queue import gpu_user_jobs
+
+    if user is None:
+        user = os.environ.get("USER", "")
+    if not user:
+        return []
+    db = Database(db_path)
+    with db:
+        return gpu_user_jobs(db.conn, user, limit=limit)
+
+
+def fetch_gpu_queue(db_path: str | None) -> dict:
+    """Fetch GPU queue wait time analysis."""
+    from slurmmon_cli.storage.database import Database
+    from slurmmon_cli.analysis.gpu_queue import (
+        gpu_wait_summary, gpu_wait_by_count, gpu_wait_by_partition,
+    )
+
+    db = Database(db_path)
+    with db:
+        return {
+            "summary": gpu_wait_summary(db.conn),
+            "by_count": gpu_wait_by_count(db.conn),
+            "by_partition": gpu_wait_by_partition(db.conn),
+        }
+
+
+def fetch_gpu_activity(db_path: str | None) -> dict:
+    """Fetch live GPU activity: per-partition allocation + top consumers + trend."""
+    from slurmmon_cli.storage.database import Database
+    from slurmmon_cli.analysis.gpu_queue import (
+        gpu_running_by_user, gpu_pending_summary, gpu_snapshot_trend,
+    )
+
+    # Live per-partition GPU allocation from node data
+    partition_gpus: list[dict] = []
+    try:
+        nodes = get_node_utilization()
+        by_part: dict[str, dict] = {}
+        for n in nodes:
+            if n.gpus_total == 0:
+                continue
+            for p in n.partitions:
+                if p not in by_part:
+                    by_part[p] = {"total": 0, "alloc": 0, "nodes": 0,
+                                  "gpu_type": n.gpu_type or ""}
+                by_part[p]["total"] += n.gpus_total
+                by_part[p]["alloc"] += n.gpus_alloc
+                by_part[p]["nodes"] += 1
+        for name, d in sorted(by_part.items(), key=lambda x: x[1]["total"],
+                               reverse=True):
+            pct = d["alloc"] / d["total"] * 100 if d["total"] else 0
+            partition_gpus.append({
+                "partition": name, "total": d["total"], "alloc": d["alloc"],
+                "idle": d["total"] - d["alloc"], "pct": round(pct, 1),
+                "nodes": d["nodes"], "gpu_type": d["gpu_type"],
+            })
+    except Exception:
+        pass
+
+    db = Database(db_path)
+    with db:
+        top_users = gpu_running_by_user(db.conn, top=15)
+        pending = gpu_pending_summary(db.conn)
+        trend = gpu_snapshot_trend(db.conn, limit=50)
+
+    return {
+        "partition_gpus": partition_gpus,
+        "top_users": top_users,
+        "pending": pending,
+        "trend": trend,
+    }
+
+
+def fetch_gpu_waste(db_path: str | None) -> dict:
+    """Fetch GPU waste indicators."""
+    from slurmmon_cli.storage.database import Database
+    from slurmmon_cli.analysis.gpu_queue import (
+        gpu_jobs_low_cpu_eff, gpu_jobs_walltime_waste,
+    )
+
+    db = Database(db_path)
+    with db:
+        low_cpu = gpu_jobs_low_cpu_eff(db.conn, threshold=50.0, limit=20)
+        walltime = gpu_jobs_walltime_waste(db.conn, threshold=30.0, limit=20)
+
+    # Underutilized GPU nodes (allocated but low load)
+    gpu_under_nodes: list[dict] = []
+    try:
+        nodes, _ = fetch_node_data()
+        for n in nodes:
+            if n.gpus_total == 0 or n.gpus_alloc == 0:
+                continue
+            if n.load_ratio is not None and n.load_ratio < 0.3:
+                gpu_under_nodes.append({
+                    "name": n.name, "load_pct": round(n.load_ratio * 100, 1),
+                    "cpus": f"{n.cpus_alloc}/{n.cpus_total}",
+                    "gpus": f"{n.gpus_alloc}/{n.gpus_total}",
+                    "gpu_type": n.gpu_type or "-",
+                    "user": n.users[0] if n.users else "-",
+                    "partitions": ",".join(n.partitions[:2]),
+                })
+        gpu_under_nodes.sort(key=lambda x: x["load_pct"])
+    except Exception:
+        pass
+
+    return {
+        "low_cpu_eff": low_cpu,
+        "walltime_waste": walltime,
+        "underutilized_gpu_nodes": gpu_under_nodes,
+    }
