@@ -11,6 +11,12 @@ requires-python = ">=3.10"
 [project.scripts]
 slurmmon-cli = "slurmmon_cli.cli:main"
 
+[project.optional-dependencies]
+tui = [
+    "textual>=1.0.0",
+    "textual-plotext>=0.2.0",
+]
+
 [tool.setuptools.packages.find]
 where = ["src"]
 

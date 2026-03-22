@@ -158,11 +158,20 @@ def cmd_collect(args: argparse.Namespace) -> None:
 
 
 def cmd_dashboard(args: argparse.Namespace) -> None:
-    from slurmmon_cli.tui.dashboard import run_dashboard
+    try:
+        from slurmmon_cli.tui.app import run_dashboard
+    except ImportError:
+        print(
+            "The interactive dashboard requires 'textual'.\n"
+            "Install: pip install slurmmon-cli[tui]",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    cfg = getattr(args, "_config", None)
     run_dashboard(
         db_path=args.db, refresh=args.refresh,
         user_filter=args.user, partition_filter=args.partition,
-        from_db=args.from_db,
+        from_db=args.from_db, config=cfg,
     )
 
 
@@ -607,8 +616,12 @@ def main(argv: list[str] | None = None) -> None:
     args = parser.parse_args(argv)
 
     if args.command is None:
-        parser.print_help()
-        sys.exit(0)
+        # Launch TUI by default
+        args.command = "dashboard"
+        args.refresh = 30
+        args.user = None
+        args.partition = None
+        args.from_db = False
 
     # Load config and attach to args for handler access
     from slurmmon_cli.config import load_config

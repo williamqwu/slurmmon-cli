@@ -1,0 +1,76 @@
+/* slurmmon-cli default theme */
+
+Screen {
+    layout: vertical;
+}
+
+#cluster-summary {
+    height: auto;
+    max-height: 5;
+    padding: 0 1;
+}
+
+#partition-table {
+    height: auto;
+    max-height: 12;
+}
+
+#running-table {
+    height: 1fr;
+    min-height: 5;
+}
+
+#pending-table {
+    height: 1fr;
+    min-height: 4;
+}
+
+.section-label {
+    color: $accent;
+    text-style: bold;
+    padding: 0 1;
+}
+
+/* Explorer */
+#explorer-tabs {
+    height: 1fr;
+}
+
+/* Settings */
+SettingsScreen {
+    align: center middle;
+}
+
+#settings-container {
+    width: 60;
+    max-height: 80%;
+    border: thick $accent;
+    padding: 1 2;
+    background: $surface;
+}
+
+#settings-container Static {
+    margin: 0 0 0 0;
+}
+
+.settings-section {
+    margin: 1 0 0 0;
+    color: $accent;
+    text-style: bold;
+}
+
+.settings-row {
+    layout: horizontal;
+    height: 3;
+    align: left middle;
+}
+
+.settings-label {
+    width: 20;
+    content-align: right middle;
+    padding: 0 1;
+}
+
+.settings-value {
+    width: 1fr;
+}
