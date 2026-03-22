@@ -20,6 +20,7 @@ class ExplorerScreen(Screen):
     BINDINGS = [
         Binding("r", "refresh", "Refresh", show=True),
         Binding("o", "cycle_sort", "Sort nodes", show=True),
+        Binding("p", "cycle_partition", "Partition filter", show=True),
         Binding("c", "cycle_chart", "Chart mode", show=True),
     ]
 
@@ -168,6 +169,10 @@ class ExplorerScreen(Screen):
     def action_cycle_sort(self) -> None:
         heatmap = self.query_one("#node-heatmap", NodeHeatmap)
         heatmap.cycle_sort()
+
+    def action_cycle_partition(self) -> None:
+        heatmap = self.query_one("#node-heatmap", NodeHeatmap)
+        heatmap.cycle_partition()
 
     def action_cycle_chart(self) -> None:
         chart = self.query_one("#gpu-chart", GpuChart)
