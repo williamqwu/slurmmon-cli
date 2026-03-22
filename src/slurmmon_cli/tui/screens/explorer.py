@@ -13,16 +13,25 @@ from textual import work
 from slurmmon_cli.tui.widgets.node_heatmap import NodeHeatmap
 from slurmmon_cli.tui.widgets.gpu_chart import GpuChart
 
+# Tab-specific key hints
+_TAB_HINTS = {
+    "tab-gpu": " Keys: [r] refresh",
+    "tab-cpu": " Keys: [r] refresh",
+    "tab-accounts": " Keys: [r] refresh",
+    "tab-nodes": " Keys: [r] refresh  [o] sort  [v] view mode  [p] partition  [arrows] navigate  [enter] detail",
+    "tab-chart": " Keys: [r] refresh  [c] chart mode",
+}
+
 
 class ExplorerScreen(Screen):
     """GPU and resource usage explorer with tabbed analysis views."""
 
     BINDINGS = [
-        Binding("r", "refresh", "Refresh", show=True),
-        Binding("o", "cycle_sort", "Sort nodes", show=True),
-        Binding("v", "cycle_view", "Node view", show=True),
-        Binding("p", "cycle_partition", "Partition filter", show=True),
-        Binding("c", "cycle_chart", "Chart mode", show=True),
+        Binding("r", "refresh", "Refresh", show=False),
+        Binding("o", "cycle_sort", "Sort", show=False),
+        Binding("v", "cycle_view", "View", show=False),
+        Binding("p", "cycle_partition", "Partition", show=False),
+        Binding("c", "cycle_chart", "Chart", show=False),
     ]
 
     def compose(self) -> ComposeResult:
@@ -43,10 +52,16 @@ class ExplorerScreen(Screen):
                 yield NodeHeatmap(id="node-heatmap")
             with TabPane("GPU Chart", id="tab-chart"):
                 yield GpuChart(id="gpu-chart")
+        yield Static(_TAB_HINTS.get("tab-gpu", ""), id="tab-hints")
         yield Footer()
 
+    def on_tabbed_content_tab_activated(self, event) -> None:
+        """Update hint bar when tab changes."""
+        tab_id = event.pane.id if hasattr(event, "pane") else ""
+        hint = _TAB_HINTS.get(tab_id, " Keys: [r] refresh")
+        self.query_one("#tab-hints", Static).update(hint)
+
     def on_mount(self) -> None:
-        # GPU users table
         gt = self.query_one("#gpu-table", DataTable)
         gt.add_columns(
             "#", "USER", "ACCOUNT", "GPU-HOURS", "JOBS(R/P)",
@@ -54,12 +69,10 @@ class ExplorerScreen(Screen):
         )
         gt.cursor_type = "row"
 
-        # CPU users table
         ct = self.query_one("#cpu-table", DataTable)
         ct.add_columns("#", "USER", "ACCOUNT", "CPU-HOURS", "GPU-HOURS", "FAIRSHARE")
         ct.cursor_type = "row"
 
-        # Account table
         at = self.query_one("#account-table", DataTable)
         at.add_columns(
             "#", "ACCOUNT", "GPU-HOURS", "CPU-HOURS", "USERS",
@@ -69,14 +82,15 @@ class ExplorerScreen(Screen):
 
         self._load_all_tabs()
 
+    def _get_cluster(self) -> str | None:
+        name = getattr(self.app, "cluster_name", "")
+        return name if name else None
+
     def _load_all_tabs(self) -> None:
         self._load_gpu_data()
         self._load_cpu_data()
         self._load_account_data()
         self._load_node_data()
-
-    def _get_cluster(self) -> str | None:
-        return getattr(self.app, "cluster_name", None) or None
 
     @work(thread=True)
     def _load_gpu_data(self) -> None:
@@ -101,7 +115,6 @@ class ExplorerScreen(Screen):
             gt.add_row(str(i), r.get("user", "?"), r.get("account", "-"),
                        f"{gpu_hrs:,}", jobs_str, nodes_str, fair, types)
 
-        # Also update chart
         chart = self.query_one("#gpu-chart", GpuChart)
         chart.set_data(rows)
 

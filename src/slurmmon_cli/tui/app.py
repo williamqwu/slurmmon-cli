@@ -46,6 +46,10 @@ class SlurmmonApp(App):
         self.cluster_name = ""
 
     def on_mount(self) -> None:
+        # Detect cluster synchronously before installing screens
+        # so Explorer has the cluster name immediately
+        self._detect_cluster_sync()
+
         from slurmmon_cli.tui.screens.monitor import MonitorScreen
         from slurmmon_cli.tui.screens.explorer import ExplorerScreen
         from slurmmon_cli.tui.screens.efficiency import EfficiencyScreen
@@ -61,6 +65,17 @@ class SlurmmonApp(App):
         if not self.from_db:
             self._initial_collect()
 
+    def _detect_cluster_sync(self) -> None:
+        """Detect cluster name synchronously from sinfo."""
+        try:
+            from slurmmon_cli.slurm import get_cluster_info
+            info = get_cluster_info()
+            if info and info.cluster_name and info.cluster_name != "unknown":
+                self.cluster_name = info.cluster_name
+                self.sub_title = self.cluster_name
+        except Exception:
+            pass
+
     @work(thread=True)
     def _initial_collect(self) -> None:
         """Run one collect cycle in background to populate the DB."""
@@ -74,7 +89,8 @@ class SlurmmonApp(App):
             db.connect()
             try:
                 stats = collect_snapshot(db, sshare_interval=sshare_interval)
-                self.cluster_name = stats.get("cluster", "")
+                if not self.cluster_name:
+                    self.cluster_name = stats.get("cluster", "")
             finally:
                 db.close()
         except Exception as exc:

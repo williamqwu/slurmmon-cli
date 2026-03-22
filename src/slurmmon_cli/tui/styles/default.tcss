@@ -42,6 +42,14 @@ Screen {
     padding: 0 1;
 }
 
+#tab-hints {
+    height: 1;
+    dock: bottom;
+    color: $text;
+    background: $surface;
+    padding: 0 1;
+}
+
 /* Efficiency */
 #efficiency-tabs {
     height: 1fr;

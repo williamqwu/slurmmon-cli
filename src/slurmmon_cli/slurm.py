@@ -999,4 +999,8 @@ def get_jobs_on_node(node_name: str) -> list[Job]:
         nodes = expand_node_list(job.node_list)
         if node_name in nodes:
             result.append(job)
+        elif node_name in job.node_list:
+            # Fallback: substring match for compressed formats
+            # expand_node_list may not handle
+            result.append(job)
     return result
