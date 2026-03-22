@@ -19,6 +19,8 @@ class ExplorerScreen(Screen):
 
     BINDINGS = [
         Binding("r", "refresh", "Refresh", show=True),
+        Binding("o", "cycle_sort", "Sort nodes", show=True),
+        Binding("c", "cycle_chart", "Chart mode", show=True),
     ]
 
     def compose(self) -> ComposeResult:
@@ -26,6 +28,11 @@ class ExplorerScreen(Screen):
         with TabbedContent(id="explorer-tabs"):
             with TabPane("GPU Users", id="tab-gpu"):
                 yield DataTable(id="gpu-table")
+                yield Static(
+                    " FAIRSHARE: Slurm scheduling priority (0-1). "
+                    "Higher = higher priority. Based on fair share of resources vs recent usage.",
+                    id="fairshare-note",
+                )
             with TabPane("CPU Users", id="tab-cpu"):
                 yield DataTable(id="cpu-table")
             with TabPane("Accounts", id="tab-accounts"):
@@ -39,7 +46,10 @@ class ExplorerScreen(Screen):
     def on_mount(self) -> None:
         # GPU users table
         gt = self.query_one("#gpu-table", DataTable)
-        gt.add_columns("#", "USER", "ACCOUNT", "GPU-HOURS", "JOBS(R/P)", "NODES", "FAIRSHARE", "GPU TYPES")
+        gt.add_columns(
+            "#", "USER", "ACCOUNT", "GPU-HOURS", "JOBS(R/P)",
+            "NODES(F/P)", "FAIRSHARE", "GPU TYPES",
+        )
         gt.cursor_type = "row"
 
         # CPU users table
@@ -49,7 +59,10 @@ class ExplorerScreen(Screen):
 
         # Account table
         at = self.query_one("#account-table", DataTable)
-        at.add_columns("#", "ACCOUNT", "GPU-HOURS", "CPU-HOURS", "USERS")
+        at.add_columns(
+            "#", "ACCOUNT", "GPU-HOURS", "CPU-HOURS", "USERS",
+            "JOBS(R/P)", "NODES(F/P)",
+        )
         at.cursor_type = "row"
 
         self._load_all_tabs()
@@ -77,9 +90,11 @@ class ExplorerScreen(Screen):
             jr = r.get("gpu_jobs_running", 0)
             jp = r.get("gpu_jobs_pending", 0)
             jobs_str = f"{jr}/{jp}"
-            nodes = str(r.get("gpu_node_count", 0))
+            fn = r.get("full_nodes", 0)
+            pn = r.get("partial_nodes", 0)
+            nodes_str = f"{fn}/{pn}"
             gt.add_row(str(i), r.get("user", "?"), r.get("account", "-"),
-                       f"{gpu_hrs:,}", jobs_str, nodes, fair, types)
+                       f"{gpu_hrs:,}", jobs_str, nodes_str, fair, types)
 
         # Also update chart
         chart = self.query_one("#gpu-chart", GpuChart)
@@ -115,8 +130,13 @@ class ExplorerScreen(Screen):
         for i, r in enumerate(rows, 1):
             gpu_hrs = r.get("gpu_tres_mins", 0) // 60
             cpu_hrs = r.get("cpu_tres_mins", 0) // 60
+            jr = r.get("jobs_running", 0)
+            jp = r.get("jobs_pending", 0)
+            fn = r.get("full_nodes", 0)
+            pn = r.get("partial_nodes", 0)
             at.add_row(str(i), r.get("account", "?"),
-                       f"{gpu_hrs:,}", f"{cpu_hrs:,}", str(r.get("num_users", 0)))
+                       f"{gpu_hrs:,}", f"{cpu_hrs:,}", str(r.get("num_users", 0)),
+                       f"{jr}/{jp}", f"{fn}/{pn}")
 
     @work(thread=True)
     def _load_node_data(self) -> None:
@@ -127,7 +147,6 @@ class ExplorerScreen(Screen):
     def _update_node_heatmap(self, nodes) -> None:
         heatmap = self.query_one("#node-heatmap", NodeHeatmap)
         allocated = [n for n in nodes if n.cpus_alloc > 0]
-        allocated.sort(key=lambda n: n.load_ratio if n.load_ratio is not None else 999)
         heatmap.set_data(allocated, show_users=True)
 
     @staticmethod
@@ -145,3 +164,11 @@ class ExplorerScreen(Screen):
 
     def action_refresh(self) -> None:
         self._load_all_tabs()
+
+    def action_cycle_sort(self) -> None:
+        heatmap = self.query_one("#node-heatmap", NodeHeatmap)
+        heatmap.cycle_sort()
+
+    def action_cycle_chart(self) -> None:
+        chart = self.query_one("#gpu-chart", GpuChart)
+        chart.cycle_mode()

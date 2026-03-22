@@ -19,8 +19,9 @@ class SlurmmonApp(App):
     ENABLE_COMMAND_PALETTE = False
 
     BINDINGS = [
-        Binding("m", "switch_screen('monitor')", "[M]onitor [X]plore [S]ettings", show=True),
+        Binding("m", "switch_screen('monitor')", "[M]onitor [X]plore [E]fficiency [S]ettings", show=True),
         Binding("x", "switch_screen('explorer')", "Explore", show=False),
+        Binding("e", "switch_screen('efficiency')", "Efficiency", show=False),
         Binding("s", "push_screen('settings')", "Settings", show=False),
         Binding("q", "quit", "Quit", show=True),
     ]
@@ -46,10 +47,12 @@ class SlurmmonApp(App):
     def on_mount(self) -> None:
         from slurmmon_cli.tui.screens.monitor import MonitorScreen
         from slurmmon_cli.tui.screens.explorer import ExplorerScreen
+        from slurmmon_cli.tui.screens.efficiency import EfficiencyScreen
         from slurmmon_cli.tui.screens.settings import SettingsScreen
 
         self.install_screen(MonitorScreen(), name="monitor")
         self.install_screen(ExplorerScreen(), name="explorer")
+        self.install_screen(EfficiencyScreen(), name="efficiency")
         self.install_screen(SettingsScreen(), name="settings")
         self.push_screen("monitor")
 

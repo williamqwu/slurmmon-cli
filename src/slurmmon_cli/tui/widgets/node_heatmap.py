@@ -14,12 +14,16 @@ _GREEN = Style(color="white", bgcolor="green")
 _YELLOW = Style(color="black", bgcolor="yellow")
 _RED = Style(color="white", bgcolor="red")
 _GRAY = Style(color="white", bgcolor="#444444")
-# Exclusive-use node: special border style (cyan background for single-user full nodes)
-_EXCL_GREEN = Style(color="white", bgcolor="dark_green", bold=True)
-_EXCL_YELLOW = Style(color="black", bgcolor="dark_goldenrod", bold=True)
-_EXCL_RED = Style(color="white", bgcolor="dark_red", bold=True)
 _CELL_WIDTH = 10
 _LINES_PER_NODE = 3  # name, user, load%
+
+SORT_MODES = ["name", "load_asc", "load_desc", "users"]
+SORT_LABELS = {
+    "name": "Sort: name",
+    "load_asc": "Sort: load (worst first)",
+    "load_desc": "Sort: load (best first)",
+    "users": "Sort: user count",
+}
 
 
 def _is_exclusive(n: NodeUtilization) -> bool:
@@ -27,26 +31,24 @@ def _is_exclusive(n: NodeUtilization) -> bool:
     return (
         len(n.users) == 1
         and n.cpus_alloc > 0
-        and n.cpus_alloc >= n.cpus_total * 0.9  # >= 90% of CPUs allocated
+        and n.cpus_alloc >= n.cpus_total * 0.9
     )
 
 
 def _load_style(n: NodeUtilization) -> Style:
     if n.load_ratio is None or n.cpus_alloc == 0:
         return _GRAY
-    exclusive = _is_exclusive(n)
     if n.load_ratio >= 0.8:
-        return _EXCL_GREEN if exclusive else _GREEN
+        return _GREEN
     if n.load_ratio >= 0.5:
-        return _EXCL_YELLOW if exclusive else _YELLOW
-    return _EXCL_RED if exclusive else _RED
+        return _YELLOW
+    return _RED
 
 
 class NodeHeatmap(Widget):
     """Grid of nodes colored by CPU load ratio.
 
-    Exclusive-use nodes (single user, >=90% CPUs) are shown in bold
-    with darker background to distinguish them from shared nodes.
+    Exclusive-use nodes (single user, >=90% CPUs) get box-drawing borders.
     """
 
     DEFAULT_CSS = """
@@ -60,11 +62,29 @@ class NodeHeatmap(Widget):
         super().__init__(**kwargs)
         self._node_data: list[NodeUtilization] = []
         self._show_users = False
+        self._sort_mode = "name"
         self._cols = 1
 
     def set_data(self, nodes: list[NodeUtilization], show_users: bool = False) -> None:
-        self._node_data = sorted(nodes, key=lambda n: n.name)
+        self._node_data = list(nodes)
         self._show_users = show_users
+        self._apply_sort()
+        self.refresh()
+
+    def _apply_sort(self) -> None:
+        if self._sort_mode == "name":
+            self._node_data.sort(key=lambda n: n.name)
+        elif self._sort_mode == "load_asc":
+            self._node_data.sort(key=lambda n: n.load_ratio if n.load_ratio is not None else 999)
+        elif self._sort_mode == "load_desc":
+            self._node_data.sort(key=lambda n: -(n.load_ratio or 0))
+        elif self._sort_mode == "users":
+            self._node_data.sort(key=lambda n: len(n.users), reverse=True)
+
+    def cycle_sort(self) -> None:
+        idx = SORT_MODES.index(self._sort_mode)
+        self._sort_mode = SORT_MODES[(idx + 1) % len(SORT_MODES)]
+        self._apply_sort()
         self.refresh()
 
     def get_content_height(self, container, viewport, width) -> int:
@@ -72,7 +92,7 @@ class NodeHeatmap(Widget):
             return 2
         self._cols = max(1, width // _CELL_WIDTH)
         rows = (len(self._node_data) + self._cols - 1) // self._cols
-        return rows * _LINES_PER_NODE + 1  # +1 for header/legend
+        return rows * _LINES_PER_NODE + 1
 
     def render_line(self, y: int) -> Strip:
         width = self.size.width
@@ -82,17 +102,18 @@ class NodeHeatmap(Widget):
         self._cols = max(1, width // _CELL_WIDTH)
 
         if y == 0:
+            # Legend + sort mode
             return Strip([
-                Segment(" Nodes: ", Style(bold=True)),
-                Segment("\u2588 >=80% ", _GREEN),
                 Segment(" "),
-                Segment("\u2588 50-80% ", _YELLOW),
+                Segment("\u2588 >=80%", _GREEN),
                 Segment(" "),
-                Segment("\u2588 <50% ", _RED),
+                Segment("\u2588 50-80%", _YELLOW),
                 Segment(" "),
-                Segment("\u2588 idle ", _GRAY),
+                Segment("\u2588 <50%", _RED),
                 Segment(" "),
-                Segment("[bold]=exclusive[/] ", Style(bold=True)),
+                Segment("\u2588 idle", _GRAY),
+                Segment("  \u250c\u2500\u2510=exclusive  ", Style(bold=True)),
+                Segment(SORT_LABELS.get(self._sort_mode, ""), Style(dim=True)),
             ])
 
         data_y = y - 1
@@ -100,6 +121,8 @@ class NodeHeatmap(Widget):
         line_in_cell = data_y % _LINES_PER_NODE
 
         segments: list[Segment] = [Segment(" ")]
+        cw = _CELL_WIDTH
+
         for col in range(self._cols):
             idx = row_idx * self._cols + col
             if idx >= len(self._node_data):
@@ -108,28 +131,43 @@ class NodeHeatmap(Widget):
             style = _load_style(n)
             exclusive = _is_exclusive(n)
 
+            inner_w = cw - 2  # space for border chars or padding
+
             if line_in_cell == 0:
-                # Line 1: node name (with exclusive marker)
-                name = n.name[-6:] if len(n.name) > 6 else n.name
+                # Name line
+                name = n.name[-inner_w:] if len(n.name) > inner_w else n.name
                 if exclusive:
-                    name = f"*{name}"
-                cell = f" {name:^{_CELL_WIDTH - 2}} "
+                    # Top border: corner + horizontal line + corner
+                    fill = "\u2500" * (inner_w - len(name))
+                    cell = f"\u250c{name}{fill}\u2510"
+                else:
+                    cell = f" {name:^{inner_w}} "
             elif line_in_cell == 1:
-                # Line 2: user(s)
+                # User line
                 if n.users:
-                    uname = n.users[0][:6]
-                    if len(n.users) > 1:
-                        uname = f"{uname}+{len(n.users) - 1}"
+                    if exclusive or len(n.users) == 1:
+                        uname = n.users[0][:inner_w]
+                    else:
+                        uname = f"{len(n.users)} users"
+                        if len(uname) > inner_w:
+                            uname = uname[:inner_w]
                 else:
                     uname = "-"
-                cell = f" {uname:^{_CELL_WIDTH - 2}} "
+                if exclusive:
+                    cell = f"\u2502{uname:^{inner_w}}\u2502"
+                else:
+                    cell = f" {uname:^{inner_w}} "
             else:
-                # Line 3: load percentage
+                # Load% line
                 if n.load_ratio is not None and n.cpus_alloc > 0:
                     pct = f"{n.load_ratio * 100:.0f}%"
                 else:
                     pct = "--"
-                cell = f" {pct:^{_CELL_WIDTH - 2}} "
+                if exclusive:
+                    fill = "\u2500" * (inner_w - len(pct))
+                    cell = f"\u2514{pct}{fill}\u2518"
+                else:
+                    cell = f" {pct:^{inner_w}} "
 
             segments.append(Segment(cell, style))
 

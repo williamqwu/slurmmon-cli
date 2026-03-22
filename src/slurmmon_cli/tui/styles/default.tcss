@@ -36,6 +36,17 @@ Screen {
     height: 1fr;
 }
 
+#fairshare-note {
+    height: auto;
+    color: $text-muted;
+    padding: 0 1;
+}
+
+/* Efficiency */
+#efficiency-tabs {
+    height: 1fr;
+}
+
 /* Settings */
 SettingsScreen {
     align: center middle;

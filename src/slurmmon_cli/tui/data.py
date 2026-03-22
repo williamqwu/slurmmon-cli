@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import os
+
 from slurmmon_cli.models import ClusterInfo, Job, NodeUtilization, PartitionInfo
 from slurmmon_cli.slurm import (
     get_cluster_info, get_queue, get_node_utilization, get_running_jobs_by_node,
@@ -97,8 +99,63 @@ def fetch_node_data() -> tuple[list[NodeUtilization], dict[str, list[str]]]:
     return nodes, node_users
 
 
+def compute_user_node_breakdown(
+    nodes: list[NodeUtilization],
+) -> dict[str, dict[str, int]]:
+    """Compute per-user full/partial node counts from live node data.
+
+    A node is "full" for a user if that user is the sole occupant and
+    >= 90% of CPUs are allocated. Otherwise it is "partial".
+    """
+    result: dict[str, dict[str, int]] = {}
+    for n in nodes:
+        if n.cpus_alloc == 0 or not n.users:
+            continue
+        exclusive = (
+            len(n.users) == 1
+            and n.cpus_alloc >= n.cpus_total * 0.9
+        )
+        for user in n.users:
+            if user not in result:
+                result[user] = {"full": 0, "partial": 0}
+            if exclusive:
+                result[user]["full"] += 1
+            else:
+                result[user]["partial"] += 1
+    return result
+
+
+def compute_account_node_breakdown(
+    nodes: list[NodeUtilization],
+    user_accounts: dict[str, str],
+) -> dict[str, dict[str, int]]:
+    """Compute per-account full/partial node counts."""
+    result: dict[str, dict[str, int]] = {}
+    for n in nodes:
+        if n.cpus_alloc == 0 or not n.users:
+            continue
+        exclusive = (
+            len(n.users) == 1
+            and n.cpus_alloc >= n.cpus_total * 0.9
+        )
+        # Attribute to accounts of users on this node
+        seen_accounts: set[str] = set()
+        for user in n.users:
+            acct = user_accounts.get(user, "unknown")
+            if acct in seen_accounts:
+                continue
+            seen_accounts.add(acct)
+            if acct not in result:
+                result[acct] = {"full": 0, "partial": 0}
+            if exclusive:
+                result[acct]["full"] += 1
+            else:
+                result[acct]["partial"] += 1
+    return result
+
+
 def fetch_gpu_rankings(db_path: str | None, mode: str, top: int = 20) -> list[dict]:
-    """Fetch GPU/CPU usage rankings from DB."""
+    """Fetch GPU/CPU usage rankings from DB, enriched with live node data."""
     from slurmmon_cli.storage.database import Database
     from slurmmon_cli.analysis.gpu_usage import (
         top_gpu_users, top_cpu_users, top_gpu_accounts,
@@ -108,13 +165,152 @@ def fetch_gpu_rankings(db_path: str | None, mode: str, top: int = 20) -> list[di
     db = Database(db_path)
     with db:
         if mode == "gpu":
-            return top_gpu_users(db.conn, top=top)
+            rows = top_gpu_users(db.conn, top=top)
+            # Enrich with live node data
+            try:
+                nodes, _ = fetch_node_data()
+                breakdown = compute_user_node_breakdown(nodes)
+                for r in rows:
+                    info = breakdown.get(r.get("user", ""), {})
+                    r["full_nodes"] = info.get("full", 0)
+                    r["partial_nodes"] = info.get("partial", 0)
+            except Exception:
+                for r in rows:
+                    r["full_nodes"] = 0
+                    r["partial_nodes"] = 0
+            return rows
         elif mode == "cpu":
             return top_cpu_users(db.conn, top=top)
         elif mode == "account":
-            return top_gpu_accounts(db.conn, top=top)
+            rows = top_gpu_accounts(db.conn, top=top)
+            # Enrich accounts with job counts and node data
+            try:
+                # Job counts per account
+                acct_jobs = {}
+                for row in db.conn.execute(
+                    """SELECT account,
+                        SUM(CASE WHEN state='RUNNING' THEN 1 ELSE 0 END) AS jr,
+                        SUM(CASE WHEN state='PENDING' THEN 1 ELSE 0 END) AS jp
+                    FROM jobs WHERE state IN ('RUNNING','PENDING')
+                    GROUP BY account"""
+                ).fetchall():
+                    acct_jobs[row["account"]] = {"jr": row["jr"], "jp": row["jp"]}
+
+                # Node breakdown per account
+                nodes, _ = fetch_node_data()
+                # Build user->account map from jobs table
+                user_accts = {}
+                for row in db.conn.execute(
+                    "SELECT DISTINCT user, account FROM jobs WHERE account IS NOT NULL"
+                ).fetchall():
+                    user_accts[row["user"]] = row["account"]
+                acct_nodes = compute_account_node_breakdown(nodes, user_accts)
+
+                for r in rows:
+                    acct = r.get("account", "")
+                    jinfo = acct_jobs.get(acct, {})
+                    r["jobs_running"] = jinfo.get("jr", 0)
+                    r["jobs_pending"] = jinfo.get("jp", 0)
+                    ninfo = acct_nodes.get(acct, {})
+                    r["full_nodes"] = ninfo.get("full", 0)
+                    r["partial_nodes"] = ninfo.get("partial", 0)
+            except Exception:
+                for r in rows:
+                    r["jobs_running"] = 0
+                    r["jobs_pending"] = 0
+                    r["full_nodes"] = 0
+                    r["partial_nodes"] = 0
+            return rows
         elif mode == "requests":
             return top_gpu_requesters(db.conn, top=top)
         elif mode == "delta":
             return usage_delta(db.conn, hours=24)
     return []
+
+
+# --- Efficiency screen data ---
+
+def fetch_user_efficiency(db_path: str | None, user: str | None = None,
+                          limit: int = 50) -> list[dict]:
+    """Fetch completed jobs with efficiency metrics for a user."""
+    from slurmmon_cli.storage.database import Database
+
+    if user is None:
+        user = os.environ.get("USER", "")
+    if not user:
+        return []
+
+    db = Database(db_path)
+    with db:
+        rows = db.conn.execute(
+            """SELECT job_id, partition, num_cpus, num_gpus, elapsed_s,
+                      cpu_time_s, req_mem_mb, max_rss_mb, state,
+                      CASE WHEN cpu_time_s IS NOT NULL AND elapsed_s > 0 AND num_cpus > 0
+                          THEN ROUND(cpu_time_s / (num_cpus * elapsed_s) * 100.0, 1)
+                          END AS cpu_eff,
+                      CASE WHEN max_rss_mb IS NOT NULL AND req_mem_mb > 0
+                          THEN ROUND(max_rss_mb / req_mem_mb * 100.0, 1)
+                          END AS mem_eff
+               FROM jobs
+               WHERE user = ? AND state IN ('COMPLETED', 'FAILED', 'TIMEOUT')
+                     AND elapsed_s > 0
+               ORDER BY submit_time DESC LIMIT ?""",
+            (user, limit),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
+def fetch_queue_health(db_path: str | None) -> dict:
+    """Fetch queue wait time analysis."""
+    from slurmmon_cli.storage.database import Database
+    from slurmmon_cli.analysis.queue_time import (
+        wait_time_stats, wait_time_by_hour, wait_time_by_size,
+    )
+
+    db = Database(db_path)
+    with db:
+        stats = wait_time_stats(db.conn)
+        by_hour = wait_time_by_hour(db.conn)
+        by_size = wait_time_by_size(db.conn)
+    return {"stats": stats, "by_hour": by_hour, "by_size": by_size}
+
+
+def fetch_cluster_trends(db_path: str | None, limit: int = 100) -> list[dict]:
+    """Fetch recent cluster snapshots for trend display."""
+    from slurmmon_cli.storage.database import Database
+
+    db = Database(db_path)
+    with db:
+        rows = db.conn.execute(
+            """SELECT timestamp, total_nodes, alloc_nodes, idle_nodes,
+                      total_cpus, alloc_cpus, running_jobs, pending_jobs
+               FROM snapshots ORDER BY timestamp DESC LIMIT ?""",
+            (limit,),
+        ).fetchall()
+    return [dict(r) for r in reversed(rows)]  # chronological order
+
+
+def fetch_waste_report(db_path: str | None) -> dict:
+    """Fetch waste indicators: low-efficiency jobs + underutilized nodes."""
+    from slurmmon_cli.storage.database import Database
+    from slurmmon_cli.analysis.efficiency import low_efficiency_jobs
+
+    db = Database(db_path)
+    with db:
+        low_eff = low_efficiency_jobs(db.conn, threshold_pct=50.0, limit=20)
+
+    # Underutilized nodes (live)
+    under_nodes = []
+    try:
+        nodes, _ = fetch_node_data()
+        under_nodes = [
+            {"name": n.name, "load_ratio": n.load_ratio,
+             "cpus_alloc": n.cpus_alloc, "cpus_total": n.cpus_total,
+             "users": ",".join(n.users[:3])}
+            for n in nodes
+            if n.cpus_alloc > 0 and n.load_ratio is not None and n.load_ratio < 0.3
+        ]
+    except Exception:
+        pass
+
+    return {"low_efficiency_jobs": low_eff, "underutilized_nodes": under_nodes}
