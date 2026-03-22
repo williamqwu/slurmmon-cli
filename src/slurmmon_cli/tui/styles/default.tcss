@@ -36,13 +36,7 @@ Screen {
     height: 1fr;
 }
 
-#fairshare-note {
-    height: auto;
-    color: $text-muted;
-    padding: 0 1;
-}
-
-#nodes-hint, #chart-hint {
+#fairshare-note, #cpu-hint, #accounts-hint, #nodes-hint, #chart-hint {
     height: 1;
     color: $text-muted;
     background: $surface;

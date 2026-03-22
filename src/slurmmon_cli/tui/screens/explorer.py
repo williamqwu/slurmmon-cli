@@ -32,26 +32,35 @@ class ExplorerScreen(Screen):
             with TabPane("GPU Users", id="tab-gpu"):
                 yield DataTable(id="gpu-table")
                 yield Static(
-                    " FAIRSHARE: Slurm scheduling priority (0-1). "
-                    "Higher = higher priority.",
+                    " \\[enter] user jobs  |  "
+                    "FAIRSHARE: Slurm scheduling priority (0-1, higher = higher priority)",
                     id="fairshare-note",
                 )
             with TabPane("CPU Users", id="tab-cpu"):
                 yield DataTable(id="cpu-table")
+                yield Static(" \\[enter] user jobs", id="cpu-hint")
             with TabPane("Accounts", id="tab-accounts"):
                 yield DataTable(id="account-table")
+                yield Static(" \\[enter] account jobs", id="accounts-hint")
             with TabPane("Nodes", id="tab-nodes"):
                 yield Static(
-                    " Keys: \[o]sort \[v]view \[p]partition \[arrows]navigate \[enter]detail",
+                    " \\[o] sort  \\[v] view  \\[p] partition  \\[arrows] navigate  \\[enter] detail",
                     id="nodes-hint",
                 )
                 yield NodeHeatmap(id="node-heatmap")
             with TabPane("GPU Chart", id="tab-chart"):
-                yield Static(" Keys: \[c] switch metric", id="chart-hint")
+                yield Static(
+                    " \\[c] switch metric  \\[up/down] navigate  \\[enter] user jobs",
+                    id="chart-hint",
+                )
                 yield GpuChart(id="gpu-chart")
         yield Footer()
 
     def on_mount(self) -> None:
+        self._gpu_rows: list[dict] = []
+        self._cpu_rows: list[dict] = []
+        self._account_rows: list[dict] = []
+
         gt = self.query_one("#gpu-table", DataTable)
         gt.add_columns(
             "#", "USER", "ACCOUNT", "GPU-HOURS", "JOBS(R/P)",
@@ -100,6 +109,8 @@ class ExplorerScreen(Screen):
         self._load_account_data()
         self._load_node_data()
 
+    # --- GPU Users ---
+
     @work(thread=True)
     def _load_gpu_data(self) -> None:
         from slurmmon_cli.tui.data import fetch_gpu_rankings
@@ -108,6 +119,7 @@ class ExplorerScreen(Screen):
         self.app.call_from_thread(self._update_gpu_table, rows)
 
     def _update_gpu_table(self, rows: list[dict]) -> None:
+        self._gpu_rows = rows
         gt = self.query_one("#gpu-table", DataTable)
         gt.clear()
         for i, r in enumerate(rows, 1):
@@ -126,6 +138,8 @@ class ExplorerScreen(Screen):
         chart = self.query_one("#gpu-chart", GpuChart)
         chart.set_data(rows)
 
+    # --- CPU Users ---
+
     @work(thread=True)
     def _load_cpu_data(self) -> None:
         from slurmmon_cli.tui.data import fetch_gpu_rankings
@@ -134,6 +148,7 @@ class ExplorerScreen(Screen):
         self.app.call_from_thread(self._update_cpu_table, rows)
 
     def _update_cpu_table(self, rows: list[dict]) -> None:
+        self._cpu_rows = rows
         ct = self.query_one("#cpu-table", DataTable)
         ct.clear()
         for i, r in enumerate(rows, 1):
@@ -143,6 +158,8 @@ class ExplorerScreen(Screen):
             ct.add_row(str(i), r.get("user", "?"), r.get("account", "-"),
                        f"{cpu_hrs:,}", f"{gpu_hrs:,}", fair)
 
+    # --- Accounts ---
+
     @work(thread=True)
     def _load_account_data(self) -> None:
         from slurmmon_cli.tui.data import fetch_gpu_rankings
@@ -151,6 +168,7 @@ class ExplorerScreen(Screen):
         self.app.call_from_thread(self._update_account_table, rows)
 
     def _update_account_table(self, rows: list[dict]) -> None:
+        self._account_rows = rows
         at = self.query_one("#account-table", DataTable)
         at.clear()
         for i, r in enumerate(rows, 1):
@@ -164,6 +182,8 @@ class ExplorerScreen(Screen):
                        f"{gpu_hrs:,}", f"{cpu_hrs:,}", str(r.get("num_users", 0)),
                        f"{jr}/{jp}", f"{fn}/{pn}")
 
+    # --- Nodes ---
+
     @work(thread=True)
     def _load_node_data(self) -> None:
         from slurmmon_cli.tui.data import fetch_node_data
@@ -174,6 +194,8 @@ class ExplorerScreen(Screen):
         heatmap = self.query_one("#node-heatmap", NodeHeatmap)
         allocated = [n for n in nodes if n.cpus_alloc > 0]
         heatmap.set_data(allocated, show_users=True)
+
+    # --- Helpers ---
 
     @staticmethod
     def _format_gpu_types(gpu_type_mins_str: str | None) -> str:
@@ -187,6 +209,8 @@ class ExplorerScreen(Screen):
             return "-"
         parts = [f"{t}:{v:,}" for t, v in sorted(types.items(), key=lambda x: x[1], reverse=True)]
         return " ".join(parts)
+
+    # --- Actions ---
 
     def action_refresh(self) -> None:
         self._load_all_tabs()
@@ -207,6 +231,34 @@ class ExplorerScreen(Screen):
         chart = self.query_one("#gpu-chart", GpuChart)
         chart.cycle_mode()
 
+    # --- Detail drill-downs ---
+
+    def on_data_table_row_selected(self, event: DataTable.RowSelected) -> None:
+        table_id = event.data_table.id
+        idx = event.cursor_row
+        if table_id == "gpu-table" and idx < len(self._gpu_rows):
+            r = self._gpu_rows[idx]
+            from slurmmon_cli.tui.screens.user_detail import UserDetailScreen
+            self.app.push_screen(UserDetailScreen(
+                user=r["user"], account=r.get("account"), gpu_only=True,
+            ))
+        elif table_id == "cpu-table" and idx < len(self._cpu_rows):
+            r = self._cpu_rows[idx]
+            from slurmmon_cli.tui.screens.user_detail import UserDetailScreen
+            self.app.push_screen(UserDetailScreen(
+                user=r["user"], account=r.get("account"), gpu_only=False,
+            ))
+        elif table_id == "account-table" and idx < len(self._account_rows):
+            r = self._account_rows[idx]
+            from slurmmon_cli.tui.screens.account_detail import AccountDetailScreen
+            self.app.push_screen(AccountDetailScreen(account=r["account"]))
+
     def on_node_heatmap_node_selected(self, message: NodeHeatmap.NodeSelected) -> None:
         from slurmmon_cli.tui.screens.node_detail import NodeDetailScreen
         self.app.push_screen(NodeDetailScreen(message.node))
+
+    def on_gpu_chart_user_selected(self, message: GpuChart.UserSelected) -> None:
+        from slurmmon_cli.tui.screens.user_detail import UserDetailScreen
+        self.app.push_screen(UserDetailScreen(
+            user=message.user, account=message.account, gpu_only=True,
+        ))
