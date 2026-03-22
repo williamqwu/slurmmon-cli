@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from slurmwatch.tui.formatting import (
+from slurmmon_cli.tui.formatting import (
     format_duration,
     format_mem,
     pct_str,

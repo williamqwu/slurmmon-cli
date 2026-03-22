@@ -3,13 +3,13 @@ requires = ["setuptools>=64"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "slurmwatch"
+name = "slurmmon-cli"
 version = "0.1.0"
 description = "Lightweight CLI Slurm cluster job monitor"
 requires-python = ">=3.10"
 
 [project.scripts]
-slurmwatch = "slurmwatch.cli:main"
+slurmmon-cli = "slurmmon_cli.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

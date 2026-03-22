@@ -8,7 +8,7 @@ import re
 import subprocess
 from typing import Any
 
-from slurmwatch.models import ClusterInfo, Job, JobEfficiency, PartitionInfo
+from slurmmon_cli.models import ClusterInfo, Job, JobEfficiency, PartitionInfo
 
 log = logging.getLogger(__name__)
 

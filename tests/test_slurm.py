@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from slurmwatch.slurm import (
+from slurmmon_cli.slurm import (
     extract_val,
     get_cluster_info,
     get_gpu_seff,

@@ -4,12 +4,12 @@ from __future__ import annotations
 
 import time
 
-from slurmwatch.models import Job
-from slurmwatch.storage.database import Database
-from slurmwatch.storage.collector import _upsert_jobs
-from slurmwatch.analysis.users import user_summary, user_jobs
-from slurmwatch.analysis.queue_time import wait_time_stats, wait_time_by_hour, wait_time_by_size
-from slurmwatch.analysis.efficiency import job_efficiency, efficiency_summary, low_efficiency_jobs
+from slurmmon_cli.models import Job
+from slurmmon_cli.storage.database import Database
+from slurmmon_cli.storage.collector import _upsert_jobs
+from slurmmon_cli.analysis.users import user_summary, user_jobs
+from slurmmon_cli.analysis.queue_time import wait_time_stats, wait_time_by_hour, wait_time_by_size
+from slurmmon_cli.analysis.efficiency import job_efficiency, efficiency_summary, low_efficiency_jobs
 
 
 def _make_job(**kw) -> Job:

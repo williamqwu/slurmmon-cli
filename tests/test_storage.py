@@ -4,16 +4,16 @@ from __future__ import annotations
 
 import time
 
-from slurmwatch.storage.database import Database
-from slurmwatch.storage.schema import ensure_schema
-from slurmwatch.storage.collector import (
+from slurmmon_cli.storage.database import Database
+from slurmmon_cli.storage.schema import ensure_schema
+from slurmmon_cli.storage.collector import (
     _upsert_jobs,
     _insert_snapshot,
     _update_partitions,
     collect_snapshot,
     prune_old_jobs,
 )
-from slurmwatch.models import ClusterInfo, Job, PartitionInfo
+from slurmmon_cli.models import ClusterInfo, Job, PartitionInfo
 
 
 def _make_job(**overrides) -> Job:

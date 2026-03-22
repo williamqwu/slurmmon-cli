@@ -1,4 +1,4 @@
-"""CLI entry point for slurmwatch."""
+"""CLI entry point for slurmmon-cli."""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import argparse
 import sys
 import time
 
-from slurmwatch import __version__
+from slurmmon_cli import __version__
 
 
 def _parse_since(value: str) -> float:
@@ -60,12 +60,12 @@ def _pct(val: float | None) -> str:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
-        prog="slurmwatch",
+        prog="slurmmon-cli",
         description="Lightweight CLI Slurm cluster job monitor",
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
-    parser.add_argument("--db", default=None, help="SQLite database path (default: ~/.slurmwatch/data.db)")
-    parser.add_argument("--config", default=None, help="Config file path (default: ~/.slurmwatch/config.ini)")
+    parser.add_argument("--db", default=None, help="SQLite database path (default: ~/.slurmmon-cli/data.db)")
+    parser.add_argument("--config", default=None, help="Config file path (default: ~/.slurmmon-cli/config.ini)")
 
     sub = parser.add_subparsers(dest="command")
 
@@ -133,7 +133,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def cmd_collect(args: argparse.Namespace) -> None:
     import logging
-    from slurmwatch.storage.collector import run_collector
+    from slurmmon_cli.storage.collector import run_collector
 
     logging.basicConfig(
         level=logging.INFO,
@@ -146,7 +146,7 @@ def cmd_collect(args: argparse.Namespace) -> None:
 
 
 def cmd_dashboard(args: argparse.Namespace) -> None:
-    from slurmwatch.tui.dashboard import run_dashboard
+    from slurmmon_cli.tui.dashboard import run_dashboard
     run_dashboard(
         db_path=args.db, refresh=args.refresh,
         user_filter=args.user, partition_filter=args.partition,
@@ -155,8 +155,8 @@ def cmd_dashboard(args: argparse.Namespace) -> None:
 
 
 def cmd_jobs(args: argparse.Namespace) -> None:
-    from slurmwatch.storage.database import Database
-    from slurmwatch.analysis.users import user_jobs
+    from slurmmon_cli.storage.database import Database
+    from slurmmon_cli.analysis.users import user_jobs
 
     since = _parse_since(args.since)
     db = Database(args.db)
@@ -202,8 +202,8 @@ def cmd_jobs(args: argparse.Namespace) -> None:
 
 
 def cmd_users(args: argparse.Namespace) -> None:
-    from slurmwatch.storage.database import Database
-    from slurmwatch.analysis.users import user_summary
+    from slurmmon_cli.storage.database import Database
+    from slurmmon_cli.analysis.users import user_summary
 
     since = _parse_since(args.since)
     db = Database(args.db)
@@ -231,8 +231,8 @@ def cmd_users(args: argparse.Namespace) -> None:
 
 
 def cmd_waits(args: argparse.Namespace) -> None:
-    from slurmwatch.storage.database import Database
-    from slurmwatch.analysis.queue_time import (
+    from slurmmon_cli.storage.database import Database
+    from slurmmon_cli.analysis.queue_time import (
         wait_time_stats, wait_time_by_hour, wait_time_by_size,
     )
 
@@ -283,8 +283,8 @@ def cmd_waits(args: argparse.Namespace) -> None:
 
 
 def cmd_efficiency(args: argparse.Namespace) -> None:
-    from slurmwatch.storage.database import Database
-    from slurmwatch.analysis.efficiency import (
+    from slurmmon_cli.storage.database import Database
+    from slurmmon_cli.analysis.efficiency import (
         job_efficiency, efficiency_summary, low_efficiency_jobs,
     )
 
@@ -296,9 +296,9 @@ def cmd_efficiency(args: argparse.Namespace) -> None:
         if getattr(args, "gpu", False):
             if not osc_enabled:
                 print("GPU details require osc=true in config.", file=sys.stderr)
-                print("Run: slurmwatch config set general.osc true", file=sys.stderr)
+                print("Run: slurmmon-cli config set general.osc true", file=sys.stderr)
                 return
-            from slurmwatch.slurm import get_gpu_seff
+            from slurmmon_cli.slurm import get_gpu_seff
             data = get_gpu_seff(args.job)
             if data:
                 print(f"GPU details for job {data.get('job_id', args.job)}:")
@@ -316,7 +316,7 @@ def cmd_efficiency(args: argparse.Namespace) -> None:
             return
 
         # Single job - use auto-dispatcher (osc-seff or seff)
-        from slurmwatch.slurm import get_job_efficiency_auto
+        from slurmmon_cli.slurm import get_job_efficiency_auto
         eff = get_job_efficiency_auto(args.job, osc=osc_enabled)
         if eff:
             print(f"Job {eff.job_id}:")
@@ -373,7 +373,7 @@ def cmd_efficiency(args: argparse.Namespace) -> None:
 
 
 def cmd_config(args: argparse.Namespace) -> None:
-    from slurmwatch.config import load_config
+    from slurmmon_cli.config import load_config
 
     cfg = getattr(args, "_config", None) or load_config(args.config)
 
@@ -397,7 +397,7 @@ def cmd_config(args: argparse.Namespace) -> None:
 
 
 def cmd_db(args: argparse.Namespace) -> None:
-    from slurmwatch.storage.database import Database
+    from slurmmon_cli.storage.database import Database
 
     db = Database(args.db)
 
@@ -425,7 +425,7 @@ def cmd_db(args: argparse.Namespace) -> None:
             print(f"Last seen:  {datetime.datetime.fromtimestamp(newest):%Y-%m-%d %H:%M}")
 
     elif args.db_command == "prune":
-        from slurmwatch.storage.collector import prune_old_jobs
+        from slurmmon_cli.storage.collector import prune_old_jobs
         with db:
             pruned = prune_old_jobs(db, retention_days=args.days)
         print(f"Pruned {pruned} old jobs.")
@@ -439,7 +439,7 @@ def cmd_db(args: argparse.Namespace) -> None:
         print(f"Vacuumed: {before / 1024:.1f} KB -> {after / 1024:.1f} KB")
 
     else:
-        print("Usage: slurmwatch db {info|prune|vacuum}", file=sys.stderr)
+        print("Usage: slurmmon-cli db {info|prune|vacuum}", file=sys.stderr)
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -451,7 +451,7 @@ def main(argv: list[str] | None = None) -> None:
         sys.exit(0)
 
     # Load config and attach to args for handler access
-    from slurmwatch.config import load_config
+    from slurmmon_cli.config import load_config
     args._config = load_config(getattr(args, "config", None))
 
     handlers = {

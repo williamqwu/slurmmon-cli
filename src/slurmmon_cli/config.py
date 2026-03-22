@@ -1,4 +1,4 @@
-"""Configuration management for slurmwatch."""
+"""Configuration management for slurmmon-cli."""
 
 from __future__ import annotations
 
@@ -15,10 +15,10 @@ DEFAULTS = {
     },
 }
 
-DEFAULT_CONFIG_PATH = os.path.join(Path.home(), ".slurmwatch", "config.ini")
+DEFAULT_CONFIG_PATH = os.path.join(Path.home(), ".slurmmon-cli", "config.ini")
 
 
-class SlurmwatchConfig:
+class SlurmmonConfig:
     """INI-based config backed by configparser with in-memory defaults."""
 
     def __init__(self, path: str | None = None):
@@ -56,6 +56,6 @@ class SlurmwatchConfig:
         return list(self._parser.items(section))
 
 
-def load_config(path: str | None = None) -> SlurmwatchConfig:
+def load_config(path: str | None = None) -> SlurmmonConfig:
     """Load config from path or default location."""
-    return SlurmwatchConfig(path)
+    return SlurmmonConfig(path)

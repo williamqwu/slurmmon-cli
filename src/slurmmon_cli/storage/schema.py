@@ -1,4 +1,4 @@
-"""SQLite schema for slurmwatch historical data."""
+"""SQLite schema for slurmmon-cli historical data."""
 
 from __future__ import annotations
 

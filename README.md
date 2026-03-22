@@ -1,4 +1,4 @@
-# slurmwatch
+# slurmmon-cli
 
 Lightweight CLI tool for monitoring Slurm cluster jobs. Designed to run on login nodes with minimal resource usage.
 
@@ -20,25 +20,25 @@ Requires Python 3.10+.
 
 ```bash
 # Live dashboard (refreshes every 30s, press q to quit)
-slurmwatch dashboard
+slurmmon-cli dashboard
 
 # Start collecting historical data (one-shot, good for cron)
-slurmwatch collect
+slurmmon-cli collect
 
 # Or run as a daemon (every 5 minutes)
-slurmwatch collect --daemon --interval 300
+slurmmon-cli collect --daemon --interval 300
 
 # Per-user summary for the last 7 days
-slurmwatch users --since 7d
+slurmmon-cli users --since 7d
 
 # Queue wait time analysis by hour of day
-slurmwatch waits --by-hour --since 7d
+slurmmon-cli waits --by-hour --since 7d
 
 # Job efficiency report (low efficiency jobs)
-slurmwatch efficiency --low 50 --since 7d
+slurmmon-cli efficiency --low 50 --since 7d
 
 # Single job efficiency
-slurmwatch efficiency --job 12345
+slurmmon-cli efficiency --job 12345
 ```
 
 ## Commands
@@ -59,22 +59,22 @@ slurmwatch efficiency --job 12345
 On OSC clusters (ascend, cardinal), enable GPU efficiency reporting:
 
 ```bash
-slurmwatch config set general.osc true
+slurmmon-cli config set general.osc true
 
 # Now efficiency reports include GPU metrics
-slurmwatch efficiency --job 12345
+slurmmon-cli efficiency --job 12345
 
 # Detailed per-GPU breakdown
-slurmwatch efficiency --job 12345 --gpu
+slurmmon-cli efficiency --job 12345 --gpu
 ```
 
 ## Config
 
-Settings are stored in `~/.slurmwatch/config.ini`. View with `slurmwatch config show`.
+Settings are stored in `~/.slurmmon-cli/config.ini`. View with `slurmmon-cli config show`.
 
 | Key | Default | Description |
 |-----|---------|-------------|
 | `general.osc` | `false` | Enable OSC-specific tools (osc-seff, gpu-seff) |
-| `general.db_path` | (empty) | SQLite path (default: `~/.slurmwatch/data.db`) |
+| `general.db_path` | (empty) | SQLite path (default: `~/.slurmmon-cli/data.db`) |
 | `general.refresh_interval` | `30` | Dashboard refresh in seconds |
 | `general.retention_days` | `30` | Days to keep historical data |

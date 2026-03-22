@@ -6,8 +6,8 @@ import curses
 import time
 from typing import Any
 
-from slurmwatch.models import ClusterInfo, Job
-from slurmwatch.tui.formatting import (
+from slurmmon_cli.models import ClusterInfo, Job
+from slurmmon_cli.tui.formatting import (
     format_duration, format_mem, progress_bar, truncate,
 )
 
@@ -49,7 +49,7 @@ def render_header(win, y: int, width: int, cluster_name: str,
                   refresh_s: int) -> int:
     """Render the title bar. Returns next y."""
     now_str = time.strftime("%Y-%m-%d %H:%M:%S")
-    title = f" slurmwatch   {cluster_name}   {now_str}"
+    title = f" slurmmon-cli   {cluster_name}   {now_str}"
     keys = " [q]uit [u]ser [r]efresh [s]ort [p]art"
     line = title + " " * max(0, width - len(title) - len(keys)) + keys
     _addstr(win, y, 0, line[:width], curses.color_pair(C_HEADER) | curses.A_BOLD)

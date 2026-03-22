@@ -6,7 +6,7 @@ import os
 import sqlite3
 from pathlib import Path
 
-from slurmwatch.storage.schema import ensure_schema
+from slurmmon_cli.storage.schema import ensure_schema
 
 
 class Database:
@@ -14,7 +14,7 @@ class Database:
 
     def __init__(self, db_path: str | None = None):
         if db_path is None:
-            db_dir = Path.home() / ".slurmwatch"
+            db_dir = Path.home() / ".slurmmon-cli"
             db_dir.mkdir(exist_ok=True)
             db_path = str(db_dir / "data.db")
         self.db_path = db_path

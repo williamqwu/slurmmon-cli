@@ -1,13 +1,13 @@
-"""Curses-based TUI dashboard for slurmwatch."""
+"""Curses-based TUI dashboard for slurmmon-cli."""
 
 from __future__ import annotations
 
 import curses
 import time
 
-from slurmwatch.models import ClusterInfo, Job
-from slurmwatch.slurm import get_cluster_info, get_queue
-from slurmwatch.tui.panels import (
+from slurmmon_cli.models import ClusterInfo, Job
+from slurmmon_cli.slurm import get_cluster_info, get_queue
+from slurmmon_cli.tui.panels import (
     init_colors,
     render_cluster_summary,
     render_footer,
@@ -29,8 +29,8 @@ def _fetch_live(user_filter: str | None = None) -> tuple[list[Job], ClusterInfo 
 def _fetch_from_db(db_path: str | None, user_filter: str | None = None
                    ) -> tuple[list[Job], ClusterInfo | None]:
     """Fetch latest data from the SQLite database."""
-    from slurmwatch.storage.database import Database
-    from slurmwatch.models import PartitionInfo
+    from slurmmon_cli.storage.database import Database
+    from slurmmon_cli.models import PartitionInfo
 
     db = Database(db_path)
     conn = db.connect(readonly=True)

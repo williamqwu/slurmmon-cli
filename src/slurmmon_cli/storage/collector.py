@@ -5,9 +5,9 @@ from __future__ import annotations
 import logging
 import time
 
-from slurmwatch.models import ClusterInfo, Job
-from slurmwatch.slurm import get_cluster_info, get_job_history, get_queue
-from slurmwatch.storage.database import Database
+from slurmmon_cli.models import ClusterInfo, Job
+from slurmmon_cli.slurm import get_cluster_info, get_job_history, get_queue
+from slurmmon_cli.storage.database import Database
 
 log = logging.getLogger(__name__)
 
