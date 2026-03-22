@@ -72,6 +72,7 @@ class NodeDetailScreen(ModalScreen):
         jt = self.query_one("#node-jobs-table", DataTable)
         jt.add_columns("JOBID", "USER", "ACCOUNT", "CPUS", "GPUS", "MEM", "ELAPSED", "LIMIT")
         jt.cursor_type = "row"
+        jt.focus()
 
         self._load_jobs()
 

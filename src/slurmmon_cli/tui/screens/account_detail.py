@@ -57,6 +57,7 @@ class AccountDetailScreen(ModalScreen):
             "MEM", "NODES", "ELAPSED", "LIMIT", "CLUSTER",
         )
         jt.cursor_type = "row"
+        jt.focus()
 
         self.query_one("#account-info", Static).update(
             f" Account: {self._account}    (loading...)"

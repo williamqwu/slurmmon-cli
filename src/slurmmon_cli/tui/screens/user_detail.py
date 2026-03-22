@@ -69,6 +69,7 @@ class UserDetailScreen(ModalScreen):
             "MEM", "NODES", "ELAPSED", "LIMIT", "CLUSTER",
         )
         jt.cursor_type = "row"
+        jt.focus()
 
         label = "GPU jobs" if self._gpu_only else "Jobs"
         self.query_one("#user-info", Static).update(
