@@ -9,21 +9,28 @@ from textual.widget import Widget
 
 from slurmmon_cli.models import NodeUtilization
 
-# Colors for load ratio ranges
+# Colors for utilization ranges
 _GREEN = Style(color="white", bgcolor="green")
 _YELLOW = Style(color="black", bgcolor="yellow")
 _RED = Style(color="white", bgcolor="red")
 _GRAY = Style(color="white", bgcolor="#444444")
 _HEADER_STYLE = Style(color="cyan", bold=True)
 _CELL_WIDTH = 10
-_LINES_PER_NODE = 3  # name, user, load%
+_LINES_PER_NODE = 3  # name, user, metric
 
 SORT_MODES = ["name", "load_asc", "load_desc", "users"]
 SORT_LABELS = {
     "name": "Sort: name",
-    "load_asc": "Sort: load (worst first)",
-    "load_desc": "Sort: load (best first)",
+    "load_asc": "Sort: metric (worst first)",
+    "load_desc": "Sort: metric (best first)",
     "users": "Sort: user count",
+}
+
+VIEW_MODES = ["cpu_load", "memory", "gpu_alloc"]
+VIEW_LABELS = {
+    "cpu_load": "View: CPU load",
+    "memory": "View: Memory usage",
+    "gpu_alloc": "View: GPU allocation",
 }
 
 
@@ -35,19 +42,55 @@ def _is_exclusive(n: NodeUtilization) -> bool:
     )
 
 
-def _load_style(n: NodeUtilization) -> Style:
-    if n.load_ratio is None or n.cpus_alloc == 0:
+def _ratio_style(ratio: float | None) -> Style:
+    """Color style based on a 0-1 utilization ratio."""
+    if ratio is None:
         return _GRAY
-    if n.load_ratio >= 0.8:
+    if ratio >= 0.8:
         return _GREEN
-    if n.load_ratio >= 0.5:
+    if ratio >= 0.5:
         return _YELLOW
     return _RED
 
 
-def _render_node_cell(n: NodeUtilization, line_in_cell: int) -> tuple[str, Style]:
+def _get_node_metric(n: NodeUtilization, view: str) -> tuple[float | None, str]:
+    """Get (ratio, display_string) for a node based on view mode."""
+    if view == "cpu_load":
+        ratio = n.load_ratio if n.cpus_alloc > 0 else None
+        if ratio is not None:
+            label = f"{ratio * 100:.0f}%"
+        else:
+            label = "--"
+    elif view == "memory":
+        if n.mem_total_mb > 0 and n.mem_alloc_mb > 0:
+            ratio = n.mem_alloc_mb / n.mem_total_mb
+            mem_gb = n.mem_alloc_mb / 1024
+            label = f"{mem_gb:.0f}G"
+        else:
+            ratio = None
+            label = "--"
+    elif view == "gpu_alloc":
+        if n.gpus_total > 0:
+            ratio = n.gpus_alloc / n.gpus_total
+            label = f"{n.gpus_alloc}/{n.gpus_total}"
+        elif n.cpus_alloc > 0:
+            # Non-GPU node that is allocated
+            ratio = None
+            label = "no gpu"
+        else:
+            ratio = None
+            label = "--"
+    else:
+        ratio = None
+        label = "--"
+    return ratio, label
+
+
+def _render_node_cell(n: NodeUtilization, line_in_cell: int,
+                      view: str) -> tuple[str, Style]:
     """Render one line of a node cell. Returns (cell_text, style)."""
-    style = _load_style(n)
+    ratio, metric_label = _get_node_metric(n, view)
+    style = _ratio_style(ratio) if n.cpus_alloc > 0 else _GRAY
     exclusive = _is_exclusive(n)
     inner_w = _CELL_WIDTH - 2
 
@@ -73,23 +116,20 @@ def _render_node_cell(n: NodeUtilization, line_in_cell: int) -> tuple[str, Style
         else:
             cell = f" {uname:^{inner_w}} "
     else:
-        if n.load_ratio is not None and n.cpus_alloc > 0:
-            pct = f"{n.load_ratio * 100:.0f}%"
-        else:
-            pct = "--"
         if exclusive:
-            fill = "\u2500" * (inner_w - len(pct))
-            cell = f"\u2514{pct}{fill}\u2518"
+            fill = "\u2500" * (inner_w - len(metric_label))
+            cell = f"\u2514{metric_label}{fill}\u2518"
         else:
-            cell = f" {pct:^{inner_w}} "
+            cell = f" {metric_label:^{inner_w}} "
 
     return cell, style
 
 
 class NodeHeatmap(Widget):
-    """Grid of nodes colored by CPU load ratio, grouped by partition.
+    """Grid of nodes colored by utilization metric, grouped by partition.
 
-    Exclusive-use nodes (single user, >=90% CPUs) get box-drawing borders.
+    View modes: CPU load, memory usage, GPU allocation.
+    Exclusive-use nodes get box-drawing borders.
     Nodes can be filtered to show only selected partitions.
     """
 
@@ -105,41 +145,43 @@ class NodeHeatmap(Widget):
         self._all_nodes: list[NodeUtilization] = []
         self._show_users = False
         self._sort_mode = "name"
+        self._view_mode = "cpu_load"
         self._group_by_partition = True
-        self._partition_filter: set[str] | None = None  # None = show all
+        self._partition_filter: set[str] | None = None
         self._available_partitions: list[str] = []
         self._cols = 1
-        # Pre-computed render lines
         self._render_lines: list[list[tuple[str, Style]]] = []
 
     def set_data(self, nodes: list[NodeUtilization], show_users: bool = False) -> None:
         self._all_nodes = list(nodes)
         self._show_users = show_users
-        # Collect available partitions
         parts: set[str] = set()
         for n in nodes:
             parts.update(n.partitions)
         self._available_partitions = sorted(parts)
         self._rebuild()
 
+    def _sort_key(self, n: NodeUtilization):
+        """Sort key based on current view mode metric."""
+        ratio, _ = _get_node_metric(n, self._view_mode)
+        return ratio if ratio is not None else 999
+
     def _apply_sort(self, nodes: list[NodeUtilization]) -> list[NodeUtilization]:
         if self._sort_mode == "name":
             return sorted(nodes, key=lambda n: n.name)
         elif self._sort_mode == "load_asc":
-            return sorted(nodes, key=lambda n: n.load_ratio if n.load_ratio is not None else 999)
+            return sorted(nodes, key=self._sort_key)
         elif self._sort_mode == "load_desc":
-            return sorted(nodes, key=lambda n: -(n.load_ratio or 0))
+            return sorted(nodes, key=lambda n: -self._sort_key(n) if self._sort_key(n) != 999 else 999)
         elif self._sort_mode == "users":
             return sorted(nodes, key=lambda n: len(n.users), reverse=True)
         return nodes
 
     def _rebuild(self) -> None:
-        """Rebuild the render line cache."""
         self._render_lines = []
         width = self.size.width if self.size.width > 0 else 120
         self._cols = max(1, width // _CELL_WIDTH)
 
-        # Filter nodes
         filtered = self._all_nodes
         if self._partition_filter:
             filtered = [
@@ -153,25 +195,29 @@ class NodeHeatmap(Widget):
             return
 
         # Legend line
-        filter_label = ""
+        filter_info = ""
         if self._partition_filter:
-            filter_label = f"  Showing: {','.join(sorted(self._partition_filter))}"
+            filter_info = f"  [{','.join(sorted(self._partition_filter))}]"
         else:
-            filter_label = "  Showing: all partitions"
+            filter_info = "  [all partitions]"
+
+        view_label = VIEW_LABELS.get(self._view_mode, "")
+        sort_label = SORT_LABELS.get(self._sort_mode, "")
 
         self._render_lines.append([
             (" ", Style()),
-            ("\u2588 >=80%", _GREEN), (" ", Style()),
+            ("\u2588>=80%", _GREEN), (" ", Style()),
             ("\u2588 50-80%", _YELLOW), (" ", Style()),
-            ("\u2588 <50%", _RED), (" ", Style()),
-            ("\u2588 idle", _GRAY),
-            ("  \u250c\u2500\u2510=exclusive  ", Style(bold=True)),
-            (SORT_LABELS.get(self._sort_mode, ""), Style(dim=True)),
-            (filter_label, Style(dim=True)),
+            ("\u2588<50%", _RED), (" ", Style()),
+            ("\u2588idle", _GRAY),
+            ("  \u250c\u2500\u2510=excl ", Style(bold=True)),
+            (view_label, Style(color="cyan")),
+            ("  ", Style()),
+            (sort_label, Style(dim=True)),
+            (filter_info, Style(dim=True)),
         ])
 
         if self._group_by_partition:
-            # Group by partition
             part_nodes: dict[str, list[NodeUtilization]] = {}
             seen: set[str] = set()
             partitions_to_show = self._partition_filter or set(self._available_partitions)
@@ -196,14 +242,13 @@ class NodeHeatmap(Widget):
         self.refresh()
 
     def _add_node_grid(self, nodes: list[NodeUtilization]) -> None:
-        """Add grid rows for a list of nodes to _render_lines."""
         cols = self._cols
         for row_start in range(0, len(nodes), cols):
             row_nodes = nodes[row_start:row_start + cols]
             for line_idx in range(_LINES_PER_NODE):
                 line: list[tuple[str, Style]] = [(" ", Style())]
                 for n in row_nodes:
-                    cell, style = _render_node_cell(n, line_idx)
+                    cell, style = _render_node_cell(n, line_idx, self._view_mode)
                     line.append((cell, style))
                 self._render_lines.append(line)
 
@@ -212,12 +257,16 @@ class NodeHeatmap(Widget):
         self._sort_mode = SORT_MODES[(idx + 1) % len(SORT_MODES)]
         self._rebuild()
 
+    def cycle_view(self) -> None:
+        """Cycle between CPU load, memory, GPU allocation views."""
+        idx = VIEW_MODES.index(self._view_mode)
+        self._view_mode = VIEW_MODES[(idx + 1) % len(VIEW_MODES)]
+        self._rebuild()
+
     def cycle_partition(self) -> None:
-        """Cycle through partition filters: all -> each partition -> all."""
         if not self._available_partitions:
             return
         if self._partition_filter is None:
-            # Show first partition only
             self._partition_filter = {self._available_partitions[0]}
         else:
             current = sorted(self._partition_filter)
@@ -227,7 +276,7 @@ class NodeHeatmap(Widget):
                 if next_idx < len(self._available_partitions):
                     self._partition_filter = {self._available_partitions[next_idx]}
                 else:
-                    self._partition_filter = None  # back to all
+                    self._partition_filter = None
             else:
                 self._partition_filter = None
         self._rebuild()
