@@ -5,7 +5,10 @@ from __future__ import annotations
 from slurmwatch.slurm import (
     extract_val,
     get_cluster_info,
+    get_gpu_seff,
     get_job_efficiency,
+    get_job_efficiency_auto,
+    get_osc_seff,
     get_queue,
     get_job_history,
     parse_mem_mb,
@@ -210,3 +213,59 @@ class TestGetJobEfficiency:
         assert abs(eff.mem_efficiency_pct - 50.0) < 0.01
         assert eff.cpu_utilized == "86:06:40"
         assert eff.walltime == "24:00:00"
+        # Standard seff should not have GPU fields
+        assert eff.gpu_efficiency_pct is None
+
+    def test_no_gpu_fields_from_seff(self, mock_slurm):
+        eff = get_job_efficiency("4349800")
+        assert eff.num_gpus is None
+        assert eff.gpu_mem_utilized is None
+
+
+class TestGetOscSeff:
+    def test_parses_cpu_and_gpu_fields(self, mock_slurm):
+        eff = get_osc_seff("4349800")
+        assert eff is not None
+        assert eff.job_id == "4349800"
+        # CPU fields
+        assert abs(eff.cpu_efficiency_pct - 89.66) < 0.01
+        assert abs(eff.mem_efficiency_pct - 50.0) < 0.01
+        assert eff.cpu_utilized == "86:06:40"
+        assert eff.walltime == "24:00:00"
+        # GPU fields
+        assert eff.num_gpus == 2
+        assert abs(eff.gpu_efficiency_pct - 83.33) < 0.01
+        assert abs(eff.gpu_mem_efficiency_pct - 75.0) < 0.01
+        assert eff.gpu_utilization == "20:00:00"
+        assert eff.gpu_mem_utilized == "30.00 GB"
+
+
+class TestGetGpuSeff:
+    def test_parses_json(self, mock_slurm):
+        data = get_gpu_seff("4349800")
+        assert data is not None
+        assert data["job_id"] == "4349800"
+        assert len(data["gpus"]) == 2
+        assert data["gpus"][0]["utilization_pct"] == 82.0
+        assert data["avg_gpu_utilization_pct"] == 83.0
+
+    def test_per_gpu_memory(self, mock_slurm):
+        data = get_gpu_seff("4349800")
+        assert data["total_gpu_memory_used_mb"] == 30720
+        assert data["total_gpu_memory_mb"] == 40960
+
+
+class TestGetJobEfficiencyAuto:
+    def test_osc_false_uses_seff(self, mock_slurm):
+        eff = get_job_efficiency_auto("4349800", osc=False)
+        assert eff is not None
+        # Standard seff - no GPU fields
+        assert eff.gpu_efficiency_pct is None
+
+    def test_osc_true_uses_osc_seff(self, mock_slurm):
+        eff = get_job_efficiency_auto("4349800", osc=True)
+        assert eff is not None
+        # osc-seff includes GPU fields
+        assert eff.gpu_efficiency_pct is not None
+        assert abs(eff.gpu_efficiency_pct - 83.33) < 0.01
+        assert eff.num_gpus == 2

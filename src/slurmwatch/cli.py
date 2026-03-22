@@ -65,6 +65,7 @@ def build_parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument("--db", default=None, help="SQLite database path (default: ~/.slurmwatch/data.db)")
+    parser.add_argument("--config", default=None, help="Config file path (default: ~/.slurmwatch/config.ini)")
 
     sub = parser.add_subparsers(dest="command")
 
@@ -109,6 +110,15 @@ def build_parser() -> argparse.ArgumentParser:
     p_eff.add_argument("--job", help="Single job ID")
     p_eff.add_argument("--since", default="24h", help="Time window")
     p_eff.add_argument("--low", type=float, default=50, help="Threshold for low efficiency")
+    p_eff.add_argument("--gpu", action="store_true", help="Show detailed GPU breakdown (requires osc=true)")
+
+    # config
+    p_cfg = sub.add_parser("config", help="Show or set config values")
+    p_cfg_sub = p_cfg.add_subparsers(dest="config_command")
+    p_cfg_sub.add_parser("show", help="Show current config")
+    p_cfg_set = p_cfg_sub.add_parser("set", help="Set a config value")
+    p_cfg_set.add_argument("key", help="Key in format section.key (e.g. general.osc)")
+    p_cfg_set.add_argument("value", help="Value to set")
 
     # db
     p_db = sub.add_parser("db", help="Database management")
@@ -278,16 +288,52 @@ def cmd_efficiency(args: argparse.Namespace) -> None:
         job_efficiency, efficiency_summary, low_efficiency_jobs,
     )
 
+    cfg = getattr(args, "_config", None)
+    osc_enabled = cfg.getboolean("general", "osc") if cfg else False
+
     if args.job:
-        # Single job - try seff first, fall back to DB
-        from slurmwatch.slurm import get_job_efficiency
-        eff = get_job_efficiency(args.job)
+        # Detailed GPU breakdown via gpu-seff
+        if getattr(args, "gpu", False):
+            if not osc_enabled:
+                print("GPU details require osc=true in config.", file=sys.stderr)
+                print("Run: slurmwatch config set general.osc true", file=sys.stderr)
+                return
+            from slurmwatch.slurm import get_gpu_seff
+            data = get_gpu_seff(args.job)
+            if data:
+                print(f"GPU details for job {data.get('job_id', args.job)}:")
+                for gpu in data.get("gpus", []):
+                    gpu_id = gpu.get("gpu_id", "?")
+                    util = gpu.get("utilization_pct", 0)
+                    mem_used = gpu.get("memory_used_mb", 0)
+                    mem_total = gpu.get("memory_total_mb", 0)
+                    mem_pct = mem_used / mem_total * 100 if mem_total > 0 else 0
+                    print(f"  GPU {gpu_id}: util {util:.0f}%  mem {mem_used}M/{mem_total}M ({mem_pct:.0f}%)")
+                avg = data.get("avg_gpu_utilization_pct", 0)
+                print(f"  Average GPU utilization: {avg:.0f}%")
+            else:
+                print(f"gpu-seff failed for job {args.job}.")
+            return
+
+        # Single job - use auto-dispatcher (osc-seff or seff)
+        from slurmwatch.slurm import get_job_efficiency_auto
+        eff = get_job_efficiency_auto(args.job, osc=osc_enabled)
         if eff:
             print(f"Job {eff.job_id}:")
             print(f"  CPU Efficiency:  {eff.cpu_efficiency_pct:.1f}%")
             print(f"  CPU Utilized:    {eff.cpu_utilized}")
             print(f"  Wall-clock time: {eff.walltime}")
             print(f"  Memory Eff:      {eff.mem_efficiency_pct:.1f}%")
+            if eff.gpu_efficiency_pct is not None:
+                print(f"  GPU Efficiency:  {eff.gpu_efficiency_pct:.1f}%")
+            if eff.gpu_mem_efficiency_pct is not None:
+                print(f"  GPU Mem Eff:     {eff.gpu_mem_efficiency_pct:.1f}%")
+            if eff.gpu_utilization:
+                print(f"  GPU Utilized:    {eff.gpu_utilization}")
+            if eff.gpu_mem_utilized:
+                print(f"  GPU Mem Used:    {eff.gpu_mem_utilized}")
+            if eff.num_gpus is not None:
+                print(f"  Total GPUs:      {eff.num_gpus}")
             return
         # Fall back to DB
         db = Database(args.db)
@@ -324,6 +370,30 @@ def cmd_efficiency(args: argparse.Namespace) -> None:
                     f"{(r.get('partition') or '-'):<15} {r.get('num_cpus', 0):>5} "
                     f"{_pct(r.get('cpu_eff_pct')):>8} {_pct(r.get('mem_eff_pct')):>8}"
                 )
+
+
+def cmd_config(args: argparse.Namespace) -> None:
+    from slurmwatch.config import load_config
+
+    cfg = getattr(args, "_config", None) or load_config(args.config)
+
+    if args.config_command == "set":
+        parts = args.key.split(".", 1)
+        if len(parts) != 2:
+            print("Key must be in format section.key (e.g. general.osc)", file=sys.stderr)
+            sys.exit(1)
+        section, key = parts
+        cfg.set(section, key, args.value)
+        cfg.save()
+        print(f"Set {section}.{key} = {args.value}")
+        print(f"Saved to {cfg.path}")
+    else:
+        # show (default)
+        print(f"Config: {cfg.path}")
+        for section in cfg.sections():
+            print(f"\n[{section}]")
+            for key, val in cfg.items(section):
+                print(f"  {key} = {val}")
 
 
 def cmd_db(args: argparse.Namespace) -> None:
@@ -380,6 +450,10 @@ def main(argv: list[str] | None = None) -> None:
         parser.print_help()
         sys.exit(0)
 
+    # Load config and attach to args for handler access
+    from slurmwatch.config import load_config
+    args._config = load_config(getattr(args, "config", None))
+
     handlers = {
         "dashboard": cmd_dashboard, "d": cmd_dashboard,
         "collect": cmd_collect,
@@ -387,6 +461,7 @@ def main(argv: list[str] | None = None) -> None:
         "users": cmd_users,
         "waits": cmd_waits,
         "efficiency": cmd_efficiency,
+        "config": cmd_config,
         "db": cmd_db,
     }
     handler = handlers.get(args.command)

@@ -543,3 +543,112 @@ def get_job_efficiency(job_id: str) -> JobEfficiency | None:
         cpu_utilized=cpu_utilized,
         walltime=walltime,
     )
+
+
+# ---------------------------------------------------------------------------
+# OSC-specific tools (gated by config osc=true)
+# ---------------------------------------------------------------------------
+
+def get_osc_seff(job_id: str) -> JobEfficiency | None:
+    """Parse ``osc-seff <job_id>`` output into a JobEfficiency with GPU fields.
+
+    osc-seff produces the same text format as seff, plus additional GPU lines.
+    Only available on OSC clusters.
+    """
+    try:
+        result = subprocess.run(
+            ["osc-seff", job_id], capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode != 0:
+            return None
+    except (subprocess.TimeoutExpired, OSError):
+        return None
+
+    text = result.stdout
+    cpu_eff = 0.0
+    mem_eff = 0.0
+    cpu_utilized = ""
+    walltime = ""
+    gpu_eff: float | None = None
+    gpu_mem_eff: float | None = None
+    gpu_utilization: str | None = None
+    gpu_mem_utilized: str | None = None
+    num_gpus: int | None = None
+
+    for line in text.splitlines():
+        line = line.strip()
+        if line.startswith("CPU Efficiency:"):
+            m = re.search(r"([\d.]+)%", line)
+            if m:
+                cpu_eff = float(m.group(1))
+        elif line.startswith("CPU Utilized:"):
+            cpu_utilized = line.split(":", 1)[1].strip()
+        elif line.startswith("Job Wall-clock time:"):
+            walltime = line.split(":", 1)[1].strip()
+        elif line.startswith("Memory Efficiency:"):
+            m = re.search(r"([\d.]+)%", line)
+            if m:
+                mem_eff = float(m.group(1))
+        elif line.startswith("Total GPUs:"):
+            try:
+                num_gpus = int(line.split(":", 1)[1].strip())
+            except ValueError:
+                pass
+        elif line.startswith("GPU Memory Utilized:"):
+            gpu_mem_utilized = line.split(":", 1)[1].strip()
+        elif line.startswith("GPU Memory Efficiency:"):
+            m = re.search(r"([\d.]+)%", line)
+            if m:
+                gpu_mem_eff = float(m.group(1))
+        elif line.startswith("GPU Utilization:"):
+            gpu_utilization = line.split(":", 1)[1].strip()
+        elif line.startswith("GPU Efficiency:"):
+            m = re.search(r"([\d.]+)%", line)
+            if m:
+                gpu_eff = float(m.group(1))
+
+    return JobEfficiency(
+        job_id=job_id,
+        cpu_efficiency_pct=cpu_eff,
+        mem_efficiency_pct=mem_eff,
+        cpu_utilized=cpu_utilized,
+        walltime=walltime,
+        gpu_efficiency_pct=gpu_eff,
+        gpu_mem_efficiency_pct=gpu_mem_eff,
+        gpu_utilization=gpu_utilization,
+        gpu_mem_utilized=gpu_mem_utilized,
+        num_gpus=num_gpus,
+    )
+
+
+def get_gpu_seff(job_id: str) -> dict | None:
+    """Run ``gpu-seff --json <job_id>`` and return parsed JSON.
+
+    Returns the raw dict for detailed per-GPU breakdown.
+    Only available on OSC clusters.
+    """
+    try:
+        result = subprocess.run(
+            ["gpu-seff", "--json", job_id],
+            capture_output=True, text=True, timeout=15,
+        )
+        if result.returncode != 0:
+            return None
+        return json.loads(result.stdout)
+    except (subprocess.TimeoutExpired, OSError, json.JSONDecodeError) as exc:
+        log.warning("gpu-seff failed: %s", exc)
+        return None
+
+
+def get_job_efficiency_auto(job_id: str, osc: bool = False) -> JobEfficiency | None:
+    """Get job efficiency, using OSC tools when available.
+
+    When osc=True, tries osc-seff first (which includes GPU metrics),
+    then falls back to standard seff.
+    When osc=False, uses standard seff only.
+    """
+    if osc:
+        eff = get_osc_seff(job_id)
+        if eff is not None:
+            return eff
+    return get_job_efficiency(job_id)

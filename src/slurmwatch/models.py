@@ -58,3 +58,9 @@ class JobEfficiency:
     mem_efficiency_pct: float
     cpu_utilized: str
     walltime: str
+    # GPU fields (populated only when OSC tools are available)
+    gpu_efficiency_pct: float | None = None
+    gpu_mem_efficiency_pct: float | None = None
+    gpu_utilization: str | None = None
+    gpu_mem_utilized: str | None = None
+    num_gpus: int | None = None
