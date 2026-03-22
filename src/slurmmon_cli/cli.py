@@ -351,9 +351,10 @@ def cmd_efficiency(args: argparse.Namespace) -> None:
     db = Database(args.db)
     with db:
         summary = efficiency_summary(db.conn, user=args.user, since=since)
-        print(f"Jobs analyzed:    {summary.get('total_jobs', 0)}")
-        print(f"  With CPU data:  {summary.get('jobs_with_cpu_data', 0)}")
-        print(f"  With mem data:  {summary.get('jobs_with_mem_data', 0)}")
+        total = summary.get('total_jobs') or 0
+        print(f"Jobs analyzed:    {total}")
+        print(f"  With CPU data:  {summary.get('jobs_with_cpu_data') or 0}")
+        print(f"  With mem data:  {summary.get('jobs_with_mem_data') or 0}")
         print(f"Avg CPU Eff:      {_pct(summary.get('avg_cpu_eff'))}")
         print(f"Avg Mem Eff:      {_pct(summary.get('avg_mem_eff'))}")
 
