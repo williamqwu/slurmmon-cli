@@ -1,0 +1,58 @@
+{
+  "sinfo": [
+    {
+      "cluster": "ascend",
+      "partition": {"name": "nextgen", "state": "up"},
+      "port": 6818,
+      "node": {"state": ["MIXED", "PLANNED"]},
+      "nodes": {"allocated": 200, "idle": 20, "other": 2, "total": 222},
+      "cpus": {"total": 17760, "idle": 1760, "allocated": 16000, "other": 0},
+      "time": {"maximum": "7-00:00:00"}
+    },
+    {
+      "cluster": "ascend",
+      "partition": {"name": "nextgen", "state": "up"},
+      "port": 6818,
+      "node": {"state": ["IDLE"]},
+      "nodes": {"allocated": 0, "idle": 26, "other": 0, "total": 26},
+      "cpus": {"total": 2080, "idle": 2080, "allocated": 0, "other": 0},
+      "time": {"maximum": "7-00:00:00"}
+    },
+    {
+      "cluster": "ascend",
+      "partition": {"name": "quad", "state": "up"},
+      "port": 6818,
+      "node": {"state": ["ALLOCATED"]},
+      "nodes": {"allocated": 20, "idle": 0, "other": 0, "total": 20},
+      "cpus": {"total": 1600, "idle": 0, "allocated": 1600, "other": 0},
+      "time": {"maximum": "7-00:00:00"}
+    },
+    {
+      "cluster": "ascend",
+      "partition": {"name": "quad", "state": "up"},
+      "port": 6818,
+      "node": {"state": ["IDLE"]},
+      "nodes": {"allocated": 0, "idle": 4, "other": 0, "total": 4},
+      "cpus": {"total": 320, "idle": 320, "allocated": 0, "other": 0},
+      "time": {"maximum": "7-00:00:00"}
+    },
+    {
+      "cluster": "ascend",
+      "partition": {"name": "longgpu", "state": "up"},
+      "port": 6818,
+      "node": {"state": ["MIXED"]},
+      "nodes": {"allocated": 50, "idle": 0, "other": 0, "total": 50},
+      "cpus": {"total": 4000, "idle": 400, "allocated": 3600, "other": 0},
+      "time": {"maximum": "14-00:00:00"}
+    },
+    {
+      "cluster": "ascend",
+      "partition": {"name": "debug-nextgen", "state": "up"},
+      "port": 6818,
+      "node": {"state": ["MIXED"]},
+      "nodes": {"allocated": 10, "idle": 2, "other": 0, "total": 12},
+      "cpus": {"total": 960, "idle": 160, "allocated": 800, "other": 0},
+      "time": {"maximum": "1:00:00"}
+    }
+  ]
+}

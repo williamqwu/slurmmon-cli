@@ -1,0 +1,201 @@
+{
+  "jobs": [
+    {
+      "account": "pas2979",
+      "job_id": 4349800,
+      "user": "alice",
+      "allocation_nodes": 1,
+      "array": {
+        "job_id": 0,
+        "task_id": {"set": false, "infinite": false, "number": 0},
+        "task": ""
+      },
+      "association": {"account": "pas2979", "cluster": "ascend", "partition": "nextgen"},
+      "partition": "nextgen",
+      "state": {"current": "COMPLETED", "reason": "NonZeroExitCode"},
+      "cpus": 4,
+      "required": {
+        "CPUs": 4,
+        "memory_per_node": {"set": true, "infinite": false, "number": 16384}
+      },
+      "tres": {
+        "allocated": [
+          {"type": "cpu", "name": "", "id": 1, "count": 4},
+          {"type": "mem", "name": "", "id": 2, "count": 16384},
+          {"type": "node", "name": "", "id": 4, "count": 1}
+        ],
+        "requested": {
+          "max": [],
+          "min": []
+        }
+      },
+      "time": {
+        "submission": {"set": true, "infinite": false, "number": 1767500000},
+        "start": {"set": true, "infinite": false, "number": 1767500300},
+        "end": {"set": true, "infinite": false, "number": 1767586700},
+        "elapsed": 86400,
+        "limit": {"set": true, "infinite": false, "number": 2880}
+      },
+      "exit_code": {"return_code": 0, "signal": {"signal_id": 0, "name": ""}},
+      "nodes": "a0101",
+      "steps": [
+        {
+          "step": {"name": "batch", "id": "batch"},
+          "statistics": {
+            "cpu": {
+              "actual_frequency": {"set": true, "infinite": false, "number": 310000}
+            },
+            "memory": {
+              "rss": {"max": {"set": true, "infinite": false, "number": 8589934592}}
+            }
+          }
+        }
+      ]
+    },
+    {
+      "account": "pas1186",
+      "job_id": 4349801,
+      "user": "bob",
+      "allocation_nodes": 3,
+      "array": {
+        "job_id": 0,
+        "task_id": {"set": false, "infinite": false, "number": 0},
+        "task": ""
+      },
+      "association": {"account": "pas1186", "cluster": "ascend", "partition": "longgpu"},
+      "partition": "longgpu",
+      "state": {"current": "COMPLETED", "reason": "None"},
+      "cpus": 32,
+      "required": {
+        "CPUs": 32,
+        "memory_per_node": {"set": true, "infinite": false, "number": 131072}
+      },
+      "tres": {
+        "allocated": [
+          {"type": "cpu", "name": "", "id": 1, "count": 32},
+          {"type": "mem", "name": "", "id": 2, "count": 131072},
+          {"type": "node", "name": "", "id": 4, "count": 3},
+          {"type": "gres", "name": "gpu", "id": 1001, "count": 2}
+        ]
+      },
+      "time": {
+        "submission": {"set": true, "infinite": false, "number": 1767400000},
+        "start": {"set": true, "infinite": false, "number": 1767403600},
+        "end": {"set": true, "infinite": false, "number": 1767576400},
+        "elapsed": 172800,
+        "limit": {"set": true, "infinite": false, "number": 10080}
+      },
+      "exit_code": {"return_code": 0, "signal": {"signal_id": 0, "name": ""}},
+      "nodes": "a[0102-0104]",
+      "steps": [
+        {
+          "step": {"name": "batch", "id": "batch"},
+          "statistics": {
+            "cpu": {
+              "actual_frequency": {"set": true, "infinite": false, "number": 4800000}
+            },
+            "memory": {
+              "rss": {"max": {"set": true, "infinite": false, "number": 68719476736}}
+            }
+          }
+        }
+      ]
+    },
+    {
+      "account": "pas2979",
+      "job_id": 4349802,
+      "user": "charlie",
+      "allocation_nodes": 1,
+      "array": {
+        "job_id": 0,
+        "task_id": {"set": false, "infinite": false, "number": 0},
+        "task": ""
+      },
+      "association": {"account": "pas2979", "cluster": "ascend", "partition": "nextgen"},
+      "partition": "nextgen",
+      "state": {"current": "FAILED", "reason": "NonZeroExitCode"},
+      "cpus": 16,
+      "required": {
+        "CPUs": 16,
+        "memory_per_node": {"set": true, "infinite": false, "number": 65536}
+      },
+      "tres": {
+        "allocated": [
+          {"type": "cpu", "name": "", "id": 1, "count": 16},
+          {"type": "mem", "name": "", "id": 2, "count": 65536},
+          {"type": "node", "name": "", "id": 4, "count": 1}
+        ]
+      },
+      "time": {
+        "submission": {"set": true, "infinite": false, "number": 1767500000},
+        "start": {"set": true, "infinite": false, "number": 1767518000},
+        "end": {"set": true, "infinite": false, "number": 1767521600},
+        "elapsed": 3600,
+        "limit": {"set": true, "infinite": false, "number": 2880}
+      },
+      "exit_code": {"return_code": 1, "signal": {"signal_id": 0, "name": ""}},
+      "nodes": "a0201",
+      "steps": [
+        {
+          "step": {"name": "batch", "id": "batch"},
+          "statistics": {
+            "cpu": {
+              "actual_frequency": {"set": true, "infinite": false, "number": 1800}
+            },
+            "memory": {
+              "rss": {"max": {"set": true, "infinite": false, "number": 2147483648}}
+            }
+          }
+        }
+      ]
+    },
+    {
+      "account": "pas1186",
+      "job_id": 4349907,
+      "user": "dave",
+      "allocation_nodes": 1,
+      "array": {
+        "job_id": 4349907,
+        "task_id": {"set": true, "infinite": false, "number": 1},
+        "task": ""
+      },
+      "association": {"account": "pas1186", "cluster": "ascend", "partition": "quad"},
+      "partition": "quad",
+      "state": {"current": "COMPLETED", "reason": "None"},
+      "cpus": 2,
+      "required": {
+        "CPUs": 2,
+        "memory_per_node": {"set": true, "infinite": false, "number": 8192}
+      },
+      "tres": {
+        "allocated": [
+          {"type": "cpu", "name": "", "id": 1, "count": 2},
+          {"type": "mem", "name": "", "id": 2, "count": 8192},
+          {"type": "node", "name": "", "id": 4, "count": 1}
+        ]
+      },
+      "time": {
+        "submission": {"set": true, "infinite": false, "number": 1767600000},
+        "start": {"set": true, "infinite": false, "number": 1767600060},
+        "end": {"set": true, "infinite": false, "number": 1767607260},
+        "elapsed": 7200,
+        "limit": {"set": true, "infinite": false, "number": 1440}
+      },
+      "exit_code": {"return_code": 0, "signal": {"signal_id": 0, "name": ""}},
+      "nodes": "a0005",
+      "steps": [
+        {
+          "step": {"name": "batch", "id": "batch"},
+          "statistics": {
+            "cpu": {
+              "actual_frequency": {"set": true, "infinite": false, "number": 12600}
+            },
+            "memory": {
+              "rss": {"max": {"set": true, "infinite": false, "number": 4294967296}}
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
