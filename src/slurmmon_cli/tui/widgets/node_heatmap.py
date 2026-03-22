@@ -39,24 +39,24 @@ class NodeHeatmap(Widget):
 
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
-        self._nodes: list[NodeUtilization] = []
+        self._node_data: list[NodeUtilization] = []
         self._cols = 1
 
     def set_data(self, nodes: list[NodeUtilization]) -> None:
-        self._nodes = sorted(nodes, key=lambda n: n.name)
+        self._node_data = sorted(nodes, key=lambda n: n.name)
         self._stale = True
         self.refresh()
 
     def get_content_height(self, container, viewport, width) -> int:
-        if not self._nodes:
+        if not self._node_data:
             return 2
         self._cols = max(1, width // _CELL_WIDTH)
-        rows = (len(self._nodes) + self._cols - 1) // self._cols
+        rows = (len(self._node_data) + self._cols - 1) // self._cols
         return rows * 2 + 1  # 2 lines per row (name + pct) + header
 
     def render_line(self, y: int) -> Strip:
         width = self.size.width
-        if not self._nodes:
+        if not self._node_data:
             return Strip([Segment(" No node data", Style(color="yellow"))])
 
         self._cols = max(1, width // _CELL_WIDTH)
@@ -88,9 +88,9 @@ class NodeHeatmap(Widget):
         segments: list[Segment] = [Segment(" ")]
         for col in range(self._cols):
             idx = row_idx * self._cols + col
-            if idx >= len(self._nodes):
+            if idx >= len(self._node_data):
                 break
-            n = self._nodes[idx]
+            n = self._node_data[idx]
             style = _load_style(n)
 
             if is_pct_line:
