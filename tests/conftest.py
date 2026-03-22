@@ -34,6 +34,8 @@ def mock_slurm(monkeypatch, squeue_data, sacct_data, sinfo_data):
             data = json.dumps(squeue_data)
         elif "sacct" in cmd_str:
             data = json.dumps(sacct_data)
+        elif "scontrol" in cmd_str and "node" in cmd_str:
+            data = (FIXTURE_DIR / "scontrol_nodes_output.json").read_text()
         elif "sshare" in cmd_str:
             data = (FIXTURE_DIR / "sshare_output.txt").read_text()
             return subprocess.CompletedProcess(cmd, 0, data, "")

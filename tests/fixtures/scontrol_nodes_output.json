@@ -1,0 +1,56 @@
+{
+  "nodes": [
+    {
+      "name": "a0101",
+      "state": ["MIXED", "PLANNED"],
+      "cpus": 128,
+      "cpu_load": 230,
+      "real_memory": 515456,
+      "alloc_memory": 328464,
+      "gres": "gpu:a100:2(S:2,7),nsight:no_consume:1",
+      "gres_used": "gpu:a100:1(IDX:1),nsight:0",
+      "tres": "cpu=120,mem=515456M,gres/gpu=2,gres/gpu:a100=2",
+      "tres_used": "cpu=114,mem=328464M,gres/gpu=1,gres/gpu:a100=1",
+      "partitions": ["nextgen", "longgpu"]
+    },
+    {
+      "name": "a0001",
+      "state": ["ALLOCATED"],
+      "cpus": 96,
+      "cpu_load": 9500,
+      "real_memory": 1029504,
+      "alloc_memory": 900000,
+      "gres": "gpu:a100:4(S:0-3),nsight:no_consume:1",
+      "gres_used": "gpu:a100:4(IDX:0-3),nsight:0",
+      "tres": "cpu=96,mem=1029504M,gres/gpu=4,gres/gpu:a100=4",
+      "tres_used": "cpu=96,mem=900000M,gres/gpu=4,gres/gpu:a100=4",
+      "partitions": ["quad", "debug-quad"]
+    },
+    {
+      "name": "a0200",
+      "state": ["IDLE"],
+      "cpus": 128,
+      "cpu_load": 0,
+      "real_memory": 515456,
+      "alloc_memory": 0,
+      "gres": "gpu:a100:2(S:2,7),nsight:no_consume:1",
+      "gres_used": "gpu:a100:0(IDX:N/A),nsight:0",
+      "tres": "cpu=120,mem=515456M,gres/gpu=2,gres/gpu:a100=2",
+      "tres_used": "",
+      "partitions": ["nextgen"]
+    },
+    {
+      "name": "a0300",
+      "state": ["DOWN", "NOT_RESPONDING"],
+      "cpus": 128,
+      "cpu_load": 0,
+      "real_memory": 515456,
+      "alloc_memory": 0,
+      "gres": "gpu:a100:2(S:2,7)",
+      "gres_used": "",
+      "tres": "",
+      "tres_used": "",
+      "partitions": ["nextgen"]
+    }
+  ]
+}

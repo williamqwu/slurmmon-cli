@@ -8,7 +8,9 @@ import re
 import subprocess
 from typing import Any
 
-from slurmmon_cli.models import ClusterInfo, Job, JobEfficiency, PartitionInfo, UserUsage
+from slurmmon_cli.models import (
+    ClusterInfo, Job, JobEfficiency, NodeUtilization, PartitionInfo, UserUsage,
+)
 
 log = logging.getLogger(__name__)
 
@@ -770,3 +772,183 @@ def get_sshare() -> list[UserUsage]:
         ))
 
     return users
+
+
+# ---------------------------------------------------------------------------
+# Node utilization via scontrol
+# ---------------------------------------------------------------------------
+
+def parse_gres_gpus(gres_str: str) -> tuple[int, str | None]:
+    """Parse a GRES string to extract total GPU count and type.
+
+    Input like ``"gpu:a100:2(S:2,7),gpu:a100:2(S:0,5),nsight:..."``
+    Returns (total_gpu_count, gpu_type_or_None).
+    """
+    if not gres_str:
+        return 0, None
+    total = 0
+    gpu_type = None
+    for m in re.finditer(r"gpu:([^:]+):(\d+)", gres_str):
+        gpu_type = m.group(1)
+        total += int(m.group(2))
+    return total, gpu_type
+
+
+def expand_node_list(node_list: str) -> list[str]:
+    """Expand a Slurm node list like ``a[0102-0104,0106]`` into individual names.
+
+    Handles common patterns:
+    - Single node: ``"a0101"``
+    - Bracket range: ``"a[0102-0104]"``
+    - Bracket list: ``"a[0101,0103]"``
+    - Mixed: ``"a[0101-0103,0106]"``
+    - Multiple groups: ``"a[0001-0002],b[0001-0002]"``
+    """
+    if not node_list or not node_list.strip():
+        return []
+
+    result: list[str] = []
+    # Split on commas that are outside brackets
+    groups: list[str] = []
+    depth = 0
+    current: list[str] = []
+    for ch in node_list:
+        if ch == "[":
+            depth += 1
+            current.append(ch)
+        elif ch == "]":
+            depth -= 1
+            current.append(ch)
+        elif ch == "," and depth == 0:
+            groups.append("".join(current))
+            current = []
+        else:
+            current.append(ch)
+    if current:
+        groups.append("".join(current))
+
+    for group in groups:
+        group = group.strip()
+        if not group:
+            continue
+        m = re.match(r"^([^\[]*)\[([^\]]+)\](.*)$", group)
+        if not m:
+            # Simple node name
+            result.append(group)
+            continue
+        prefix = m.group(1)
+        bracket = m.group(2)
+        suffix = m.group(3)
+        # Parse bracket contents: ranges and individual values
+        for part in bracket.split(","):
+            part = part.strip()
+            rm = re.match(r"^(\d+)-(\d+)$", part)
+            if rm:
+                start = int(rm.group(1))
+                end = int(rm.group(2))
+                width = len(rm.group(1))
+                for i in range(start, end + 1):
+                    result.append(f"{prefix}{str(i).zfill(width)}{suffix}")
+            else:
+                result.append(f"{prefix}{part}{suffix}")
+
+    return result
+
+
+def get_node_utilization() -> list[NodeUtilization]:
+    """Fetch per-node utilization via ``scontrol --json show node``."""
+    data = run_slurm_command(["scontrol", "--json", "show", "node"], timeout=60)
+    if data is None:
+        return []
+
+    nodes_raw = data.get("nodes", [])
+    result: list[NodeUtilization] = []
+
+    for n in nodes_raw:
+        name = n.get("name", "")
+        if not name:
+            continue
+
+        # State
+        state_raw = n.get("state", [])
+        if isinstance(state_raw, list):
+            state = state_raw[0] if state_raw else "UNKNOWN"
+        else:
+            state = str(state_raw)
+        state = str(state).upper()
+
+        # Skip down/drained nodes
+        if any(s in state for s in ("DOWN", "DRAIN", "ERROR", "FUTURE")):
+            continue
+
+        # CPUs
+        cpus_total = n.get("cpus", 0)
+
+        # CPU load (value is load * 100 in JSON)
+        cpu_load_raw = n.get("cpu_load", 0)
+        if isinstance(cpu_load_raw, dict):
+            cpu_load_raw = extract_val(cpu_load_raw) or 0
+        cpu_load = cpu_load_raw / 100.0 if cpu_load_raw else 0.0
+
+        # Memory
+        mem_total = n.get("real_memory", 0)
+        mem_alloc = n.get("alloc_memory", n.get("allocated_memory", 0))
+
+        # CPUs allocated from tres_used
+        tres_used_str = n.get("tres_used", "")
+        if isinstance(tres_used_str, str):
+            tres_used = parse_tres_string(tres_used_str)
+        else:
+            tres_used = {}
+        cpus_alloc = tres_used.get("cpu", 0)
+
+        # GPUs from gres/gres_used
+        gres_str = n.get("gres", "")
+        gres_used_str = n.get("gres_used", "")
+        gpus_total, gpu_type = parse_gres_gpus(gres_str)
+        gpus_alloc, _ = parse_gres_gpus(gres_used_str)
+
+        # Partitions
+        partitions_raw = n.get("partitions", "")
+        if isinstance(partitions_raw, list):
+            partitions = partitions_raw
+        elif isinstance(partitions_raw, str) and partitions_raw:
+            partitions = [p.strip() for p in partitions_raw.split(",")]
+        else:
+            partitions = []
+
+        # Load ratio
+        load_ratio = cpu_load / cpus_alloc if cpus_alloc > 0 else None
+
+        result.append(NodeUtilization(
+            name=name,
+            state=state,
+            cpus_total=cpus_total,
+            cpus_alloc=cpus_alloc,
+            cpu_load=cpu_load,
+            load_ratio=load_ratio,
+            mem_total_mb=mem_total,
+            mem_alloc_mb=mem_alloc,
+            gpus_total=gpus_total,
+            gpus_alloc=gpus_alloc,
+            gpu_type=gpu_type,
+            partitions=partitions,
+        ))
+
+    return result
+
+
+def get_running_jobs_by_node() -> dict[str, list[str]]:
+    """Map node names to users with running jobs on them."""
+    jobs = get_queue()
+    node_users: dict[str, list[str]] = {}
+    for job in jobs:
+        if job.state != "RUNNING" or not job.node_list:
+            continue
+        nodes = expand_node_list(job.node_list)
+        for node in nodes:
+            if node not in node_users:
+                node_users[node] = []
+            if job.user not in node_users[node]:
+                node_users[node].append(job.user)
+    return node_users

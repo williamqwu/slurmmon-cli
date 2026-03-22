@@ -75,3 +75,20 @@ class UserUsage:
     cpu_tres_mins: int                                 # from TRESRunMins
     gpu_tres_mins: int                                 # gres/gpu from TRESRunMins
     gpu_type_mins: dict[str, int] = field(default_factory=dict)  # {"a100": N}
+
+
+@dataclass(slots=True)
+class NodeUtilization:
+    name: str
+    state: str                    # ALLOCATED, MIXED, IDLE
+    cpus_total: int
+    cpus_alloc: int
+    cpu_load: float               # OS load average
+    load_ratio: float | None      # cpu_load / cpus_alloc (None if 0 alloc)
+    mem_total_mb: int
+    mem_alloc_mb: int
+    gpus_total: int
+    gpus_alloc: int
+    gpu_type: str | None          # e.g. "a100"
+    partitions: list[str] = field(default_factory=list)
+    users: list[str] = field(default_factory=list)

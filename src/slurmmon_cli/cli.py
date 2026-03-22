@@ -116,7 +116,7 @@ def build_parser() -> argparse.ArgumentParser:
     # explore
     p_explore = sub.add_parser("explore", aliases=["x"], help="GPU and resource usage explorer")
     p_explore.add_argument("--by", default="gpu",
-                           choices=["gpu", "cpu", "account", "requests", "delta"],
+                           choices=["gpu", "cpu", "account", "requests", "delta", "nodes"],
                            help="Ranking dimension (default: gpu)")
     p_explore.add_argument("--top", type=int, default=20, help="Number of top entries")
     p_explore.add_argument("--hours", type=int, default=24, help="Delta window in hours (for --by delta)")
@@ -405,6 +405,56 @@ def cmd_explore(args: argparse.Namespace) -> None:
         top_gpu_users, top_cpu_users, top_gpu_accounts,
         top_gpu_requesters, usage_delta,
     )
+
+    # Live-only modes (no DB needed)
+    if args.by == "nodes":
+        from slurmmon_cli.slurm import get_node_utilization, get_running_jobs_by_node
+        nodes = get_node_utilization()
+        if not nodes:
+            print("Could not fetch node data.")
+            return
+        node_users = get_running_jobs_by_node()
+        # Merge users into nodes
+        for n in nodes:
+            n.users = node_users.get(n.name, [])
+        # Filter to allocated nodes only
+        allocated = [n for n in nodes if n.cpus_alloc > 0]
+        if not allocated:
+            print("No allocated nodes found.")
+            return
+        # Sort by load ratio ascending (most underutilized first)
+        allocated.sort(key=lambda n: n.load_ratio if n.load_ratio is not None else 999)
+        top_nodes = allocated[:args.top]
+
+        header = (
+            f"{'NODE':<10} {'STATE':<8} {'USERS':<15} "
+            f"{'CPU(load/alloc/tot)':>20} {'LOAD%':>6} "
+            f"{'GPU(use/tot)':>12} {'MEM(alloc/tot)':>15}"
+        )
+        print(header)
+        print("-" * len(header))
+        for n in top_nodes:
+            users_str = ",".join(n.users[:3]) if n.users else "-"
+            if len(n.users) > 3:
+                users_str += f"+{len(n.users) - 3}"
+            cpu_str = f"{n.cpu_load:.1f}/{n.cpus_alloc}/{n.cpus_total}"
+            load_pct = f"{n.load_ratio * 100:.0f}%" if n.load_ratio is not None else "-"
+            gpu_str = f"{n.gpus_alloc}/{n.gpus_total}"
+            if n.gpu_type:
+                gpu_str += f" {n.gpu_type}"
+            mem_alloc = _format_mem(n.mem_alloc_mb)
+            mem_total = _format_mem(n.mem_total_mb)
+            mem_str = f"{mem_alloc}/{mem_total}"
+            print(
+                f"{n.name:<10} {n.state:<8} {users_str:<15} "
+                f"{cpu_str:>20} {load_pct:>6} "
+                f"{gpu_str:>12} {mem_str:>15}"
+            )
+
+        underutil = sum(1 for n in allocated if n.load_ratio is not None and n.load_ratio < 0.5)
+        if underutil:
+            print(f"\n{underutil} node(s) with load ratio < 50%")
+        return
 
     db = Database(args.db)
 
