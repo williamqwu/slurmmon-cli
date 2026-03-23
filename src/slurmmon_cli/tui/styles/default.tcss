@@ -69,6 +69,13 @@ Screen {
     padding: 0 0;
 }
 
+#gpu-consumers-label {
+    height: 1;
+    color: $accent;
+    text-style: bold;
+    padding: 0 0;
+}
+
 /* Settings */
 SettingsScreen {
     align: center middle;
