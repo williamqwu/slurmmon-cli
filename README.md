@@ -21,6 +21,22 @@ pip install -e ".[tui]"
 
 Requires Python 3.10+. The `[tui]` extra installs [Textual](https://github.com/Textualize/textual) for the interactive dashboard. Without it, only CLI commands are available.
 
+### Multi-cluster environments (e.g., OSC)
+
+On sites where multiple clusters share a home directory but each has its own Python (via Spack, modules, etc.), `pip install` writes a console script with a hardcoded shebang pointing to the Python that ran the install. This means the `slurmmon-cli` command only works on the cluster where you installed it.
+
+The portable alternative is `python -m slurmmon_cli`, which uses whichever `python` is in your current PATH:
+
+```bash
+# Works on any cluster regardless of where pip install was run
+python -m slurmmon_cli
+
+# Optional: add a shell alias to your ~/.bashrc
+alias slurmmon-cli='python -m slurmmon_cli'
+```
+
+The SQLite database is shared across clusters automatically. Jobs from each cluster are tagged with their cluster name, so data from Cardinal and Ascend coexists in one DB.
+
 ### Uninstall
 
 ```bash
@@ -51,10 +67,11 @@ slurmmon-cli supports two modes of operation:
 
 ### Interactive TUI
 
-Launch the dashboard by running `slurmmon-cli` with no arguments. It auto-collects cluster data on startup and provides four screens navigable by keyboard:
+Launch the dashboard with no arguments. It auto-collects cluster data on startup and provides four screens navigable by keyboard:
 
 ```bash
-slurmmon-cli
+slurmmon-cli            # if installed on this cluster
+python -m slurmmon_cli  # portable, works on any cluster
 ```
 
 | Key | Screen | What it shows |
