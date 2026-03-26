@@ -1,5 +1,7 @@
 # slurmmon-cli
 
+> Developed primarily for [Ohio Supercomputer Center (OSC)](https://www.osc.edu/) clusters such as Cardinal and Ascend. The core monitoring and analysis features work on any Slurm cluster; OSC-specific integrations (osc-seff, gpu-seff, Grafana) are gated behind a config flag.
+
 Lightweight CLI tool for monitoring Slurm cluster jobs. Designed to run on login nodes with minimal resource usage.
 
 - Real-time TUI dashboard with multi-screen navigation (Textual-based)
@@ -9,65 +11,81 @@ Lightweight CLI tool for monitoring Slurm cluster jobs. Designed to run on login
 - OSC cluster support with GPU efficiency via `osc-seff` / `gpu-seff`
 - Grafana URL generation for node metrics
 
-## Install
+## Installation
+
+### Install
 
 ```bash
 pip install -e ".[tui]"
 ```
 
-Requires Python 3.10+. The `[tui]` extra installs Textual for the interactive dashboard.
+Requires Python 3.10+. The `[tui]` extra installs [Textual](https://github.com/Textualize/textual) for the interactive dashboard. Without it, only CLI commands are available.
+
+### Uninstall
+
+```bash
+pip uninstall slurmmon-cli
+```
+
+This removes the package but leaves your data and config files (see below). To remove those as well:
+
+```bash
+rm -rf ~/.local/share/slurmmon-cli    # collected data
+rm -rf ~/.config/slurmmon-cli         # configuration
+```
+
+### Data storage
+
+slurmmon-cli follows the [XDG Base Directory Specification](https://specifications.freedesktop.org/basedir-spec/latest/):
+
+| Path | Default | Contents |
+|------|---------|----------|
+| `$XDG_DATA_HOME/slurmmon-cli/data.db` | `~/.local/share/slurmmon-cli/data.db` | SQLite database (jobs, snapshots, sshare usage) |
+| `$XDG_CONFIG_HOME/slurmmon-cli/config.ini` | `~/.config/slurmmon-cli/config.ini` | INI configuration file |
+
+The database grows with cluster activity. Typical size is 1-10 MB for a few weeks of data on a medium-sized cluster (~3,000 jobs, ~1,000 sshare users per collection). Old records are automatically pruned based on `retention_days` (default: 30 days). You can also manually manage storage with `slurmmon-cli db prune` and `slurmmon-cli db vacuum`.
 
 ## Quick Start
 
+slurmmon-cli supports two modes of operation:
+
+### Interactive TUI
+
+Launch the dashboard by running `slurmmon-cli` with no arguments. It auto-collects cluster data on startup and provides four screens navigable by keyboard:
+
 ```bash
-# Launch interactive TUI (default command)
 slurmmon-cli
-
-# Or explicitly
-slurmmon-cli dashboard
-
-# Collect historical data (one-shot, good for cron)
-slurmmon-cli collect
-
-# Run collector as daemon (every 5 minutes)
-slurmmon-cli collect --daemon --interval 300
-
-# CLI GPU usage explorer
-slurmmon-cli explore --by gpu --top 20
 ```
 
-## TUI Dashboard
-
-The dashboard auto-collects data on startup and provides four screens:
-
-| Key | Screen | Description |
-|-----|--------|-------------|
+| Key | Screen | What it shows |
+|-----|--------|---------------|
 | `M` | Monitor | Real-time cluster overview: partitions, running/pending jobs |
 | `X` | Explore | GPU/CPU usage rankings, accounts, node heatmap, GPU chart |
 | `E` | Efficiency | GPU jobs, queue wait analysis, GPU activity, waste detection |
 | `?` | Settings | View and modify configuration |
 
-Navigation: `Tab` switches between tabs within a screen. `Enter` opens detail views. `Esc` closes detail views. `Left`/`Right` arrows scroll wide tables horizontally. `Q` quits.
+`Tab` switches tabs, `Enter` opens details, `Esc` closes, `Q` quits.
 
-### Explore Screen Tabs
+### CLI Commands
 
-- **GPU Users** / **CPU Users** - Top users ranked by GPU/CPU-hours from sshare, with fairshare priority
-- **Accounts** - Top accounts by resource usage
-- **Nodes** - Color-coded node utilization heatmap (`O` sort, `V` view mode, `P` partition filter)
-- **GPU Chart** - Switchable bar chart of GPU usage metrics
+For scripting, cron jobs, or quick lookups without entering the TUI:
 
-### Efficiency Screen Tabs
+```bash
+# Collect a data snapshot (good for cron)
+slurmmon-cli collect
 
-- **GPU Jobs** - Your running and completed GPU jobs with CPU/memory/walltime efficiency
-- **GPU Queue** - Wait time comparison (GPU vs CPU-only), breakdown by GPU count and partition
-- **GPU Activity** - Live per-partition GPU allocation, top consumers, pending demand
-- **GPU Waste** - Low CPU efficiency on GPU jobs, walltime waste, underutilized GPU nodes (`F` toggles full-node filter)
+# Run collector as a daemon
+slurmmon-cli collect --daemon --interval 300
 
-### Detail Views
+# GPU usage rankings
+slurmmon-cli explore --by gpu --top 20
 
-Press `Enter` on any user, account, or node row to open a detail modal showing active jobs. In user/account detail views, press `G` to copy a Grafana node-metrics URL to the clipboard.
+# Queue wait time analysis
+slurmmon-cli waits --by-hour --since 7d
 
-## CLI Commands
+# Per-user job summary
+slurmmon-cli users --since 7d --sort cpus
+```
 
 | Command | Description |
 |---------|-------------|
@@ -81,33 +99,6 @@ Press `Enter` on any user, account, or node row to open a detail modal showing a
 | `config` | Configuration (`config show`, `config set section.key value`) |
 | `db` | Database management (`db info`, `db prune`, `db vacuum`) |
 
-## OSC Clusters
+## Documentation
 
-On OSC clusters (Ascend, Cardinal), enable GPU efficiency reporting:
-
-```bash
-slurmmon-cli config set general.osc true
-
-# Job efficiency with GPU metrics
-slurmmon-cli efficiency --job 12345
-
-# Detailed per-GPU breakdown
-slurmmon-cli efficiency --job 12345 --gpu
-```
-
-## Config
-
-File locations follow the [XDG Base Directory Specification](https://specifications.freedesktop.org/basedir-spec/latest/):
-
-- Config: `$XDG_CONFIG_HOME/slurmmon-cli/config.ini` (default: `~/.config/slurmmon-cli/config.ini`)
-- Data: `$XDG_DATA_HOME/slurmmon-cli/data.db` (default: `~/.local/share/slurmmon-cli/data.db`)
-
-View with `slurmmon-cli config show`.
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `general.osc` | `false` | Enable OSC-specific tools (osc-seff, gpu-seff) |
-| `general.db_path` | (empty) | SQLite path (default: XDG data dir) |
-| `general.refresh_interval` | `30` | Dashboard refresh in seconds |
-| `general.retention_days` | `30` | Days to keep historical data |
-| `general.sshare_interval` | `1800` | Seconds between sshare collections |
+For detailed usage of each TUI screen, tab descriptions, key bindings, and configuration options, see the [User Guide](docs/user_guide.md).
