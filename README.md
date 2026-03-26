@@ -2,6 +2,11 @@
 
 > Developed primarily for [Ohio Supercomputer Center (OSC)](https://www.osc.edu/) clusters such as Cardinal and Ascend. The core monitoring and analysis features work on any Slurm cluster; OSC-specific integrations (osc-seff, gpu-seff, Grafana) are gated behind a config flag.
 
+<p align="center">
+  <img src="docs/images/demo_nodes.png" width="49%" alt="Monitor screen: cluster overview with partitions, running and pending jobs">
+  <img src="docs/images/demo_activities.png" width="49%" alt="Explorer screen: GPU usage rankings by user">
+</p>
+
 Lightweight CLI tool for monitoring Slurm cluster jobs. Designed to run on login nodes with minimal resource usage.
 
 - Real-time TUI dashboard with multi-screen navigation (Textual-based)
@@ -10,11 +15,6 @@ Lightweight CLI tool for monitoring Slurm cluster jobs. Designed to run on login
 - Per-user job breakdowns, fairshare tracking, node utilization heatmap
 - OSC cluster support with GPU efficiency via `osc-seff` / `gpu-seff`
 - Grafana URL generation for node metrics
-
-<p align="center">
-  <img src="docs/images/demo_nodes.png" width="49%" alt="Monitor screen: cluster overview with partitions, running and pending jobs">
-  <img src="docs/images/demo_activities.png" width="49%" alt="Explorer screen: GPU usage rankings by user">
-</p>
 
 ## Installation
 
