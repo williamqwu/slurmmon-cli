@@ -1,14 +1,37 @@
+# Python
 __pycache__/
 *.py[cod]
+*.egg
 *.egg-info/
+
+# Build artifacts
 dist/
 build/
+
+# Virtual environments
+.venv/
+env/
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
+
+# SQLite databases
 *.db
 *.db-wal
 *.db-shm
-.pytest_cache/
-.venv/
-*.egg
 
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
 
-CLAUDE.md
+# AI assistants
+.claude/
+
+# OS
+.DS_Store
+Thumbs.db
