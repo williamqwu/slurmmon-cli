@@ -67,6 +67,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
     parser.add_argument("--db", default=None, help="SQLite database path (default: $XDG_DATA_HOME/slurmmon-cli/data.db)")
     parser.add_argument("--config", default=None, help="Config file path (default: $XDG_CONFIG_HOME/slurmmon-cli/config.ini)")
+    parser.add_argument("--demo", action="store_true", help="Launch with synthetic data (no Slurm cluster needed)")
 
     sub = parser.add_subparsers(dest="command")
 
@@ -648,6 +649,11 @@ def main(argv: list[str] | None = None) -> None:
         args.user = None
         args.partition = None
         args.from_db = False
+
+    # Demo mode: synthetic data, no Slurm required
+    if getattr(args, "demo", False):
+        from slurmmon_cli.demo import setup_demo
+        args.db = setup_demo()
 
     # Load config and attach to args for handler access
     from slurmmon_cli.config import load_config
