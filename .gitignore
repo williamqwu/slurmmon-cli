@@ -29,7 +29,9 @@ htmlcov/
 *.swo
 *~
 
-# AI assistants
+# Local
+.local/
+CLAUDE.md
 .claude/
 
 # OS
