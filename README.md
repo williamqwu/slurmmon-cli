@@ -11,6 +11,11 @@ Lightweight CLI tool for monitoring Slurm cluster jobs. Designed to run on login
 - OSC cluster support with GPU efficiency via `osc-seff` / `gpu-seff`
 - Grafana URL generation for node metrics
 
+<p align="center">
+  <img src="docs/images/demo_nodes.png" width="49%" alt="Monitor screen: cluster overview with partitions, running and pending jobs">
+  <img src="docs/images/demo_activities.png" width="49%" alt="Explorer screen: GPU usage rankings by user">
+</p>
+
 ## Installation
 
 ### Install
@@ -60,6 +65,17 @@ slurmmon-cli follows the [XDG Base Directory Specification](https://specificatio
 | `$XDG_CONFIG_HOME/slurmmon-cli/config.ini` | `~/.config/slurmmon-cli/config.ini` | INI configuration file |
 
 The database grows with cluster activity. Typical size is 1-10 MB for a few weeks of data on a medium-sized cluster (~3,000 jobs, ~1,000 sshare users per collection). Old records are automatically pruned based on `retention_days` (default: 30 days). You can also manually manage storage with `slurmmon-cli db prune` and `slurmmon-cli db vacuum`.
+
+## Demo Mode
+
+Try slurmmon-cli without a Slurm cluster using built-in synthetic data:
+
+```bash
+slurmmon-cli --demo            # launch TUI with a fictional "nebula" cluster
+slurmmon-cli --demo explore --by gpu --top 10
+```
+
+The `--demo` flag generates a deterministic dataset (30 users, 212 nodes, ~2,800 jobs across 4 partitions) and patches all Slurm calls so no real cluster is needed. Data is stored in a temporary database that is cleaned up on exit. This is useful for trying out the tool, taking screenshots, or testing without exposing real cluster data.
 
 ## Quick Start
 
