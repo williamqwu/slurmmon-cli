@@ -23,6 +23,7 @@ def fetch_live(
 def fetch_from_db(
     db_path: str | None,
     user_filter: str | None = None,
+    cluster: str | None = None,
 ) -> tuple[list[Job], ClusterInfo | None]:
     """Fetch latest data from the SQLite database."""
     from slurmmon_cli.storage.database import Database
@@ -35,6 +36,9 @@ def fetch_from_db(
     if user_filter:
         conditions.append("user = ?")
         params.append(user_filter)
+    if cluster:
+        conditions.append("cluster = ?")
+        params.append(cluster)
     where = "WHERE " + " AND ".join(conditions)
 
     rows = conn.execute(
@@ -55,11 +59,29 @@ def fetch_from_db(
             reason=r["reason"],
         ))
 
-    snap = conn.execute(
-        "SELECT * FROM snapshots ORDER BY timestamp DESC LIMIT 1"
-    ).fetchone()
+    if cluster:
+        snap = conn.execute(
+            "SELECT * FROM snapshots WHERE cluster = ? ORDER BY timestamp DESC LIMIT 1",
+            (cluster,),
+        ).fetchone()
+        part_rows = conn.execute(
+            "SELECT * FROM partitions WHERE cluster = ?", (cluster,)
+        ).fetchall()
+    else:
+        snap = conn.execute(
+            "SELECT * FROM snapshots ORDER BY timestamp DESC LIMIT 1"
+        ).fetchone()
+        # Derive cluster from latest snapshot to avoid mixing partitions
+        snap_cluster = ""
+        if snap and "cluster" in snap.keys():
+            snap_cluster = snap["cluster"] or ""
+        if snap_cluster:
+            part_rows = conn.execute(
+                "SELECT * FROM partitions WHERE cluster = ?", (snap_cluster,)
+            ).fetchall()
+        else:
+            part_rows = conn.execute("SELECT * FROM partitions").fetchall()
 
-    part_rows = conn.execute("SELECT * FROM partitions").fetchall()
     partitions = [
         PartitionInfo(
             name=p["name"], state=p["state"] or "UP",
@@ -72,8 +94,9 @@ def fetch_from_db(
     ]
 
     if snap:
+        cluster_name = cluster or snap["cluster"] if "cluster" in snap.keys() else "unknown"
         info = ClusterInfo(
-            cluster_name="cluster",
+            cluster_name=cluster_name,
             partitions=partitions,
             total_nodes=snap["total_nodes"] or 0,
             idle_nodes=snap["idle_nodes"] or 0,
@@ -119,33 +142,43 @@ def _rows_to_jobs(rows) -> list[Job]:
 
 
 def fetch_user_jobs(db_path: str | None, user: str,
-                    gpu_only: bool = False) -> list[Job]:
+                    gpu_only: bool = False,
+                    cluster: str | None = None) -> list[Job]:
     """Fetch running/pending jobs for a user from the DB."""
     from slurmmon_cli.storage.database import Database
 
     db = Database(db_path)
     with db:
         gpu_filter = " AND num_gpus > 0" if gpu_only else ""
+        cluster_filter = " AND cluster = ?" if cluster else ""
+        params: list = [user]
+        if cluster:
+            params.append(cluster)
         rows = db.conn.execute(
             f"""SELECT * FROM jobs
-                WHERE user = ? AND state IN ('RUNNING', 'PENDING'){gpu_filter}
+                WHERE user = ? AND state IN ('RUNNING', 'PENDING'){gpu_filter}{cluster_filter}
                 ORDER BY state, num_gpus DESC, submit_time DESC""",
-            (user,),
+            params,
         ).fetchall()
     return _rows_to_jobs(rows)
 
 
-def fetch_account_jobs(db_path: str | None, account: str) -> list[Job]:
+def fetch_account_jobs(db_path: str | None, account: str,
+                       cluster: str | None = None) -> list[Job]:
     """Fetch running/pending jobs for an account from the DB."""
     from slurmmon_cli.storage.database import Database
 
     db = Database(db_path)
     with db:
+        cluster_filter = " AND cluster = ?" if cluster else ""
+        params: list = [account]
+        if cluster:
+            params.append(cluster)
         rows = db.conn.execute(
-            """SELECT * FROM jobs
-               WHERE account = ? AND state IN ('RUNNING', 'PENDING')
+            f"""SELECT * FROM jobs
+               WHERE account = ? AND state IN ('RUNNING', 'PENDING'){cluster_filter}
                ORDER BY user, state, num_gpus DESC, submit_time DESC""",
-            (account,),
+            params,
         ).fetchall()
     return _rows_to_jobs(rows)
 
@@ -265,13 +298,16 @@ def fetch_gpu_rankings(db_path: str | None, mode: str, top: int = 20,
             # Enrich accounts with job counts and node data
             try:
                 # Job counts per account
+                acct_cf = " AND cluster = ?" if cluster else ""
+                acct_cp: list = [cluster] if cluster else []
                 acct_jobs = {}
                 for row in db.conn.execute(
-                    """SELECT account,
+                    f"""SELECT account,
                         SUM(CASE WHEN state='RUNNING' THEN 1 ELSE 0 END) AS jr,
                         SUM(CASE WHEN state='PENDING' THEN 1 ELSE 0 END) AS jp
-                    FROM jobs WHERE state IN ('RUNNING','PENDING')
-                    GROUP BY account"""
+                    FROM jobs WHERE state IN ('RUNNING','PENDING'){acct_cf}
+                    GROUP BY account""",
+                    acct_cp,
                 ).fetchall():
                     acct_jobs[row["account"]] = {"jr": row["jr"], "jp": row["jp"]}
 
@@ -280,7 +316,8 @@ def fetch_gpu_rankings(db_path: str | None, mode: str, top: int = 20,
                 # Build user->account map from jobs table
                 user_accts = {}
                 for row in db.conn.execute(
-                    "SELECT DISTINCT user, account FROM jobs WHERE account IS NOT NULL"
+                    f"SELECT DISTINCT user, account FROM jobs WHERE account IS NOT NULL{acct_cf}",
+                    acct_cp,
                 ).fetchall():
                     user_accts[row["user"]] = row["account"]
                 acct_nodes = compute_account_node_breakdown(nodes, user_accts)
@@ -301,16 +338,17 @@ def fetch_gpu_rankings(db_path: str | None, mode: str, top: int = 20,
                     r["partial_nodes"] = 0
             return rows
         elif mode == "requests":
-            return top_gpu_requesters(db.conn, top=top)
+            return top_gpu_requesters(db.conn, top=top, cluster=cluster or None)
         elif mode == "delta":
-            return usage_delta(db.conn, hours=24)
+            return usage_delta(db.conn, hours=24, cluster=cluster or None)
     return []
 
 
 # --- Efficiency screen data ---
 
 def fetch_user_efficiency(db_path: str | None, user: str | None = None,
-                          limit: int = 50) -> list[dict]:
+                          limit: int = 50,
+                          cluster: str | None = None) -> list[dict]:
     """Fetch completed jobs with efficiency metrics for a user."""
     from slurmmon_cli.storage.database import Database
 
@@ -319,10 +357,16 @@ def fetch_user_efficiency(db_path: str | None, user: str | None = None,
     if not user:
         return []
 
+    cf = " AND cluster = ?" if cluster else ""
+    params: list = [user]
+    if cluster:
+        params.append(cluster)
+    params.append(limit)
+
     db = Database(db_path)
     with db:
         rows = db.conn.execute(
-            """SELECT job_id, partition, num_cpus, num_gpus, elapsed_s,
+            f"""SELECT job_id, partition, num_cpus, num_gpus, elapsed_s,
                       cpu_time_s, req_mem_mb, max_rss_mb, state,
                       CASE WHEN cpu_time_s IS NOT NULL AND elapsed_s > 0 AND num_cpus > 0
                           THEN ROUND(cpu_time_s / (num_cpus * elapsed_s) * 100.0, 1)
@@ -332,14 +376,15 @@ def fetch_user_efficiency(db_path: str | None, user: str | None = None,
                           END AS mem_eff
                FROM jobs
                WHERE user = ? AND state IN ('COMPLETED', 'FAILED', 'TIMEOUT')
-                     AND elapsed_s > 0
+                     AND elapsed_s > 0{cf}
                ORDER BY submit_time DESC LIMIT ?""",
-            (user, limit),
+            params,
         ).fetchall()
     return [dict(r) for r in rows]
 
 
-def fetch_queue_health(db_path: str | None) -> dict:
+def fetch_queue_health(db_path: str | None,
+                       cluster: str | None = None) -> dict:
     """Fetch queue wait time analysis."""
     from slurmmon_cli.storage.database import Database
     from slurmmon_cli.analysis.queue_time import (
@@ -348,35 +393,47 @@ def fetch_queue_health(db_path: str | None) -> dict:
 
     db = Database(db_path)
     with db:
-        stats = wait_time_stats(db.conn)
-        by_hour = wait_time_by_hour(db.conn)
-        by_size = wait_time_by_size(db.conn)
+        stats = wait_time_stats(db.conn, cluster=cluster)
+        by_hour = wait_time_by_hour(db.conn, cluster=cluster)
+        by_size = wait_time_by_size(db.conn, cluster=cluster)
     return {"stats": stats, "by_hour": by_hour, "by_size": by_size}
 
 
-def fetch_cluster_trends(db_path: str | None, limit: int = 100) -> list[dict]:
+def fetch_cluster_trends(db_path: str | None, limit: int = 100,
+                         cluster: str | None = None) -> list[dict]:
     """Fetch recent cluster snapshots for trend display."""
     from slurmmon_cli.storage.database import Database
 
     db = Database(db_path)
     with db:
-        rows = db.conn.execute(
-            """SELECT timestamp, total_nodes, alloc_nodes, idle_nodes,
-                      total_cpus, alloc_cpus, running_jobs, pending_jobs
-               FROM snapshots ORDER BY timestamp DESC LIMIT ?""",
-            (limit,),
-        ).fetchall()
+        if cluster:
+            rows = db.conn.execute(
+                """SELECT timestamp, total_nodes, alloc_nodes, idle_nodes,
+                          total_cpus, alloc_cpus, running_jobs, pending_jobs
+                   FROM snapshots WHERE cluster = ?
+                   ORDER BY timestamp DESC LIMIT ?""",
+                (cluster, limit),
+            ).fetchall()
+        else:
+            rows = db.conn.execute(
+                """SELECT timestamp, total_nodes, alloc_nodes, idle_nodes,
+                          total_cpus, alloc_cpus, running_jobs, pending_jobs
+                   FROM snapshots ORDER BY timestamp DESC LIMIT ?""",
+                (limit,),
+            ).fetchall()
     return [dict(r) for r in reversed(rows)]  # chronological order
 
 
-def fetch_waste_report(db_path: str | None) -> dict:
+def fetch_waste_report(db_path: str | None,
+                       cluster: str | None = None) -> dict:
     """Fetch waste indicators: low-efficiency jobs + underutilized exclusive nodes."""
     from slurmmon_cli.storage.database import Database
     from slurmmon_cli.analysis.efficiency import low_efficiency_jobs
 
     db = Database(db_path)
     with db:
-        low_eff = low_efficiency_jobs(db.conn, threshold_pct=50.0, limit=20)
+        low_eff = low_efficiency_jobs(db.conn, threshold_pct=50.0, limit=20,
+                                       cluster=cluster)
 
     # Underutilized exclusive (full) nodes, grouped by partition
     under_by_partition: dict[str, list[dict]] = {}
@@ -414,7 +471,8 @@ def fetch_waste_report(db_path: str | None) -> dict:
 # --- GPU-focused efficiency screen data ---
 
 def fetch_gpu_user_jobs(db_path: str | None, user: str | None = None,
-                        limit: int = 50) -> list[dict]:
+                        limit: int = 50,
+                        cluster: str | None = None) -> list[dict]:
     """Fetch GPU jobs (running + completed) for a user."""
     from slurmmon_cli.storage.database import Database
     from slurmmon_cli.analysis.gpu_queue import gpu_user_jobs
@@ -425,10 +483,11 @@ def fetch_gpu_user_jobs(db_path: str | None, user: str | None = None,
         return []
     db = Database(db_path)
     with db:
-        return gpu_user_jobs(db.conn, user, limit=limit)
+        return gpu_user_jobs(db.conn, user, limit=limit, cluster=cluster)
 
 
-def fetch_gpu_queue(db_path: str | None) -> dict:
+def fetch_gpu_queue(db_path: str | None,
+                    cluster: str | None = None) -> dict:
     """Fetch GPU queue wait time analysis."""
     from slurmmon_cli.storage.database import Database
     from slurmmon_cli.analysis.gpu_queue import (
@@ -438,13 +497,14 @@ def fetch_gpu_queue(db_path: str | None) -> dict:
     db = Database(db_path)
     with db:
         return {
-            "summary": gpu_wait_summary(db.conn),
-            "by_count": gpu_wait_by_count(db.conn),
-            "by_partition": gpu_wait_by_partition(db.conn),
+            "summary": gpu_wait_summary(db.conn, cluster=cluster),
+            "by_count": gpu_wait_by_count(db.conn, cluster=cluster),
+            "by_partition": gpu_wait_by_partition(db.conn, cluster=cluster),
         }
 
 
-def fetch_gpu_activity(db_path: str | None) -> dict:
+def fetch_gpu_activity(db_path: str | None,
+                       cluster: str | None = None) -> dict:
     """Fetch live GPU activity: per-partition allocation + top consumers + trend."""
     from slurmmon_cli.storage.database import Database
     from slurmmon_cli.analysis.gpu_queue import (
@@ -479,9 +539,9 @@ def fetch_gpu_activity(db_path: str | None) -> dict:
 
     db = Database(db_path)
     with db:
-        top_users = gpu_running_by_user(db.conn, top=15)
-        pending = gpu_pending_summary(db.conn)
-        trend = gpu_snapshot_trend(db.conn, limit=50)
+        top_users = gpu_running_by_user(db.conn, top=15, cluster=cluster)
+        pending = gpu_pending_summary(db.conn, cluster=cluster)
+        trend = gpu_snapshot_trend(db.conn, limit=50, cluster=cluster)
 
     return {
         "partition_gpus": partition_gpus,
@@ -491,7 +551,8 @@ def fetch_gpu_activity(db_path: str | None) -> dict:
     }
 
 
-def fetch_gpu_waste(db_path: str | None) -> dict:
+def fetch_gpu_waste(db_path: str | None,
+                    cluster: str | None = None) -> dict:
     """Fetch GPU waste indicators."""
     from slurmmon_cli.storage.database import Database
     from slurmmon_cli.analysis.gpu_queue import (
@@ -500,8 +561,10 @@ def fetch_gpu_waste(db_path: str | None) -> dict:
 
     db = Database(db_path)
     with db:
-        low_cpu = gpu_jobs_low_cpu_eff(db.conn, threshold=50.0, limit=20)
-        walltime = gpu_jobs_walltime_waste(db.conn, threshold=30.0, limit=20)
+        low_cpu = gpu_jobs_low_cpu_eff(db.conn, threshold=50.0, limit=20,
+                                        cluster=cluster)
+        walltime = gpu_jobs_walltime_waste(db.conn, threshold=30.0, limit=20,
+                                            cluster=cluster)
 
     # Underutilized GPU nodes (allocated but low load)
     gpu_under_nodes: list[dict] = []

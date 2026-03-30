@@ -68,8 +68,11 @@ class TestTopGpuUsers:
         db = Database(tmp_db)
         db.connect()
         _seed_usage(db)
+        _seed_gpu_jobs(db)  # needed: inactive users are now filtered out
         rows = top_gpu_users(db.conn)
-        assert len(rows) == 3  # charlie has 0 GPU, excluded
+        # alice, bob, dave have GPU usage; charlie has 0 (excluded from sshare)
+        # but only alice and bob have active GPU jobs after inactive filtering
+        assert len(rows) == 2
         assert rows[0]["user"] == "alice"
         assert rows[1]["user"] == "bob"
         db.close()
@@ -78,6 +81,7 @@ class TestTopGpuUsers:
         db = Database(tmp_db)
         db.connect()
         _seed_usage(db)
+        _seed_gpu_jobs(db)
         rows = top_gpu_users(db.conn, top=1)
         assert len(rows) == 1
         db.close()
@@ -179,6 +183,192 @@ class TestUsageDelta:
         db = Database(tmp_db)
         db.connect()
         assert usage_delta(db.conn) == []
+        db.close()
+
+
+class TestClusterFiltering:
+    def test_top_gpu_users_filters_by_cluster(self, tmp_db):
+        """top_gpu_users should only return users from the specified cluster."""
+        db = Database(tmp_db)
+        db.connect()
+        now = time.time()
+        # Seed usage for two clusters
+        rows = [
+            (now, "acc1", "alice", 100000, 0.5, 100000, 50000, None, "cardinal"),
+            (now, "acc1", "bob", 80000, 0.6, 80000, 40000, None, "ascend"),
+        ]
+        db.conn.executemany(
+            """INSERT INTO user_usage (
+                collected_at, account, user, raw_usage, fairshare,
+                cpu_tres_mins, gpu_tres_mins, gpu_type_mins, cluster
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            rows,
+        )
+        db.conn.commit()
+        # Seed active GPU jobs - must pass cluster to _upsert_jobs
+        alice_job = Job(
+            job_id="10", user="alice", account="acc1", partition="gpu",
+            state="RUNNING", num_cpus=4, num_gpus=2, req_mem_mb=8192.0,
+            submit_time=now - 100, start_time=now - 50, end_time=None,
+            time_limit_s=3600, elapsed_s=50, node_list="n01",
+            exit_code=None, cpu_time_s=None, max_rss_mb=None, reason=None,
+        )
+        bob_job = Job(
+            job_id="11", user="bob", account="acc1", partition="gpu",
+            state="RUNNING", num_cpus=4, num_gpus=1, req_mem_mb=8192.0,
+            submit_time=now - 100, start_time=now - 50, end_time=None,
+            time_limit_s=3600, elapsed_s=50, node_list="n02",
+            exit_code=None, cpu_time_s=None, max_rss_mb=None, reason=None,
+        )
+        _upsert_jobs(db, [alice_job], now, cluster="cardinal")
+        _upsert_jobs(db, [bob_job], now, cluster="ascend")
+
+        cardinal = top_gpu_users(db.conn, cluster="cardinal")
+        assert len(cardinal) == 1
+        assert cardinal[0]["user"] == "alice"
+
+        ascend = top_gpu_users(db.conn, cluster="ascend")
+        assert len(ascend) == 1
+        assert ascend[0]["user"] == "bob"
+        db.close()
+
+    def test_inactive_users_filtered(self, tmp_db):
+        """Users with no active GPU jobs should be filtered out."""
+        db = Database(tmp_db)
+        db.connect()
+        now = time.time()
+        # Seed usage: both have GPU hours
+        rows = [
+            (now, "acc1", "active_user", 100000, 0.5, 100000, 50000, None, ""),
+            (now, "acc1", "inactive_user", 90000, 0.5, 90000, 45000, None, ""),
+        ]
+        db.conn.executemany(
+            """INSERT INTO user_usage (
+                collected_at, account, user, raw_usage, fairshare,
+                cpu_tres_mins, gpu_tres_mins, gpu_type_mins, cluster
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            rows,
+        )
+        db.conn.commit()
+        # Only active_user has a running GPU job
+        jobs = [
+            Job(job_id="20", user="active_user", account="acc1", partition="gpu",
+                state="RUNNING", num_cpus=4, num_gpus=2, req_mem_mb=8192.0,
+                submit_time=now - 100, start_time=now - 50, end_time=None,
+                time_limit_s=3600, elapsed_s=50, node_list="n01",
+                exit_code=None, cpu_time_s=None, max_rss_mb=None, reason=None),
+        ]
+        _upsert_jobs(db, jobs, now)
+        db.conn.commit()
+
+        result = top_gpu_users(db.conn)
+        users = [r["user"] for r in result]
+        assert "active_user" in users
+        assert "inactive_user" not in users
+        db.close()
+
+
+    def test_wait_time_filters_by_cluster(self, tmp_db):
+        """wait_time_stats should respect cluster filter."""
+        from slurmmon_cli.analysis.queue_time import wait_time_stats
+        db = Database(tmp_db)
+        db.connect()
+        now = time.time()
+        # Job on cardinal: 100s wait
+        _upsert_jobs(db, [Job(
+            job_id="30", user="alice", account="acc1", partition="gpu",
+            state="COMPLETED", num_cpus=4, num_gpus=0, req_mem_mb=4096.0,
+            submit_time=now - 200, start_time=now - 100, end_time=now,
+            time_limit_s=3600, elapsed_s=100, node_list="n01",
+            exit_code="0:0", cpu_time_s=300.0, max_rss_mb=1024.0, reason=None,
+        )], now, cluster="cardinal")
+        # Job on ascend: 500s wait
+        _upsert_jobs(db, [Job(
+            job_id="31", user="bob", account="acc1", partition="gpu",
+            state="COMPLETED", num_cpus=4, num_gpus=0, req_mem_mb=4096.0,
+            submit_time=now - 600, start_time=now - 100, end_time=now,
+            time_limit_s=3600, elapsed_s=100, node_list="n02",
+            exit_code="0:0", cpu_time_s=300.0, max_rss_mb=1024.0, reason=None,
+        )], now, cluster="ascend")
+
+        cardinal = wait_time_stats(db.conn, cluster="cardinal")
+        assert cardinal["count"] == 1
+        assert cardinal["mean"] == 100
+
+        ascend = wait_time_stats(db.conn, cluster="ascend")
+        assert ascend["count"] == 1
+        assert ascend["mean"] == 500
+        db.close()
+
+    def test_low_efficiency_filters_by_cluster(self, tmp_db):
+        """low_efficiency_jobs should respect cluster filter."""
+        from slurmmon_cli.analysis.efficiency import low_efficiency_jobs
+        db = Database(tmp_db)
+        db.connect()
+        now = time.time()
+        # Low-eff job on cardinal
+        _upsert_jobs(db, [Job(
+            job_id="40", user="alice", account="acc1", partition="gpu",
+            state="COMPLETED", num_cpus=48, num_gpus=0, req_mem_mb=4096.0,
+            submit_time=now - 1000, start_time=now - 900, end_time=now,
+            time_limit_s=3600, elapsed_s=900, node_list="n01",
+            exit_code="0:0", cpu_time_s=100.0, max_rss_mb=1024.0, reason=None,
+        )], now, cluster="cardinal")
+        # Low-eff job on ascend
+        _upsert_jobs(db, [Job(
+            job_id="41", user="bob", account="acc1", partition="gpu",
+            state="COMPLETED", num_cpus=48, num_gpus=0, req_mem_mb=4096.0,
+            submit_time=now - 1000, start_time=now - 900, end_time=now,
+            time_limit_s=3600, elapsed_s=900, node_list="n02",
+            exit_code="0:0", cpu_time_s=200.0, max_rss_mb=1024.0, reason=None,
+        )], now, cluster="ascend")
+
+        cardinal = low_efficiency_jobs(db.conn, cluster="cardinal")
+        assert all(r["user"] == "alice" for r in cardinal)
+
+        ascend = low_efficiency_jobs(db.conn, cluster="ascend")
+        assert all(r["user"] == "bob" for r in ascend)
+        db.close()
+
+    def test_usage_delta_no_cross_cluster_join(self, tmp_db):
+        """usage_delta should not join prev from a different cluster."""
+        db = Database(tmp_db)
+        db.connect()
+        now = time.time()
+        t_old = now - 90000
+        # Earlier snapshot: alice on cardinal, bob on ascend
+        db.conn.executemany(
+            """INSERT INTO user_usage (
+                collected_at, account, user, raw_usage, fairshare,
+                cpu_tres_mins, gpu_tres_mins, gpu_type_mins, cluster
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            [
+                (t_old, "acc1", "alice", 50000, 0.5, 50000, 10000, None, "cardinal"),
+                (t_old, "acc1", "bob", 40000, 0.6, 40000, 8000, None, "ascend"),
+            ],
+        )
+        # Latest snapshot: same users, same clusters
+        db.conn.executemany(
+            """INSERT INTO user_usage (
+                collected_at, account, user, raw_usage, fairshare,
+                cpu_tres_mins, gpu_tres_mins, gpu_type_mins, cluster
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            [
+                (now, "acc1", "alice", 60000, 0.5, 60000, 15000, None, "cardinal"),
+                (now, "acc1", "bob", 50000, 0.6, 50000, 12000, None, "ascend"),
+            ],
+        )
+        db.conn.commit()
+
+        cardinal = usage_delta(db.conn, hours=24, cluster="cardinal")
+        users = [r["user"] for r in cardinal]
+        assert "alice" in users
+        assert "bob" not in users
+
+        ascend = usage_delta(db.conn, hours=24, cluster="ascend")
+        users = [r["user"] for r in ascend]
+        assert "bob" in users
+        assert "alice" not in users
         db.close()
 
 

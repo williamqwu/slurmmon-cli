@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 
-SCHEMA_VERSION = "5"
+SCHEMA_VERSION = 6
 
 DDL = """
 CREATE TABLE IF NOT EXISTS jobs (
@@ -49,13 +49,15 @@ CREATE TABLE IF NOT EXISTS snapshots (
     running_jobs  INTEGER,
     pending_jobs  INTEGER,
     total_gpus    INTEGER DEFAULT 0,
-    alloc_gpus    INTEGER DEFAULT 0
+    alloc_gpus    INTEGER DEFAULT 0,
+    cluster       TEXT DEFAULT ''
 );
 
 CREATE INDEX IF NOT EXISTS idx_snap_time ON snapshots (timestamp);
+CREATE INDEX IF NOT EXISTS idx_snap_cluster ON snapshots (cluster);
 
 CREATE TABLE IF NOT EXISTS partitions (
-    name          TEXT PRIMARY KEY,
+    name          TEXT NOT NULL,
     state         TEXT,
     total_nodes   INTEGER,
     idle_nodes    INTEGER,
@@ -64,7 +66,9 @@ CREATE TABLE IF NOT EXISTS partitions (
     total_cpus    INTEGER,
     avail_cpus    INTEGER,
     max_time      TEXT,
-    last_updated  REAL
+    last_updated  REAL,
+    cluster       TEXT DEFAULT '',
+    PRIMARY KEY (name, cluster)
 );
 
 CREATE TABLE IF NOT EXISTS metadata (
@@ -91,19 +95,23 @@ CREATE INDEX IF NOT EXISTS idx_uu_gpu ON user_usage (gpu_tres_mins);
 """
 
 
-def ensure_schema(conn: sqlite3.Connection) -> None:
-    """Create tables if they don't exist and apply migrations."""
-    # Check current version before running DDL
+def _current_version(conn: sqlite3.Connection) -> int | None:
+    """Read the schema version as an int, or None if not set."""
     try:
         row = conn.execute(
             "SELECT value FROM metadata WHERE key = 'schema_version'"
         ).fetchone()
-        current = row[0] if row else None
+        return int(row[0]) if row else None
     except Exception:
-        current = None
+        return None
+
+
+def ensure_schema(conn: sqlite3.Connection) -> None:
+    """Create tables if they don't exist and apply migrations."""
+    current = _current_version(conn)
 
     # Migration: v2 -> v3: add cluster column to user_usage
-    if current and current < "3":
+    if current is not None and current < 3:
         try:
             conn.execute("ALTER TABLE user_usage ADD COLUMN cluster TEXT DEFAULT ''")
             conn.commit()
@@ -111,7 +119,7 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             pass  # column already exists
 
     # Migration: v3 -> v4: add cluster column to jobs
-    if current and current < "4":
+    if current is not None and current < 4:
         try:
             conn.execute("ALTER TABLE jobs ADD COLUMN cluster TEXT DEFAULT ''")
             conn.commit()
@@ -119,13 +127,68 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
             pass
 
     # Migration: v4 -> v5: add GPU counts to snapshots
-    if current and current < "5":
+    if current is not None and current < 5:
         for col in ("total_gpus", "alloc_gpus"):
             try:
                 conn.execute(f"ALTER TABLE snapshots ADD COLUMN {col} INTEGER DEFAULT 0")
             except Exception:
                 pass
         conn.commit()
+
+    # Migration: v5 -> v6: add cluster to snapshots; composite PK for partitions
+    if current is not None and current < 6:
+        try:
+            conn.execute("ALTER TABLE snapshots ADD COLUMN cluster TEXT DEFAULT ''")
+        except Exception:
+            pass
+        # Recreate partitions with composite PK (name, cluster).
+        # Use a savepoint so a failure mid-way does not leave the DB
+        # without a partitions table.
+        conn.execute("SAVEPOINT migrate_partitions")
+        try:
+            conn.execute("""CREATE TABLE partitions_new (
+                name TEXT NOT NULL, state TEXT, total_nodes INTEGER,
+                idle_nodes INTEGER, alloc_nodes INTEGER, other_nodes INTEGER,
+                total_cpus INTEGER, avail_cpus INTEGER, max_time TEXT,
+                last_updated REAL, cluster TEXT DEFAULT '',
+                PRIMARY KEY (name, cluster)
+            )""")
+            conn.execute(
+                "INSERT OR IGNORE INTO partitions_new "
+                "SELECT name, state, total_nodes, idle_nodes, alloc_nodes, "
+                "other_nodes, total_cpus, avail_cpus, max_time, last_updated, "
+                "'' FROM partitions"
+            )
+            conn.execute("DROP TABLE partitions")
+            conn.execute("ALTER TABLE partitions_new RENAME TO partitions")
+            conn.execute("RELEASE migrate_partitions")
+        except Exception:
+            conn.execute("ROLLBACK TO migrate_partitions")
+            conn.execute("RELEASE migrate_partitions")
+        conn.commit()
+
+        # Backfill empty/unknown cluster values with detected cluster name
+        try:
+            import subprocess
+            result = subprocess.run(
+                ["scontrol", "show", "config"],
+                capture_output=True, text=True, timeout=10,
+            )
+            cluster_name = ""
+            for line in result.stdout.splitlines():
+                if line.strip().startswith("ClusterName"):
+                    cluster_name = line.split("=", 1)[1].strip()
+                    break
+            if cluster_name:
+                for table in ("jobs", "user_usage"):
+                    conn.execute(
+                        f"UPDATE {table} SET cluster = ? "
+                        "WHERE cluster IN ('', 'unknown')",
+                        (cluster_name,),
+                    )
+                conn.commit()
+        except Exception:
+            pass
 
     conn.executescript(DDL)
     # Create cluster indexes (safe now that columns exist)
@@ -135,11 +198,11 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
     if current is None:
         conn.execute(
             "INSERT INTO metadata (key, value) VALUES ('schema_version', ?)",
-            (SCHEMA_VERSION,),
+            (str(SCHEMA_VERSION),),
         )
     elif current != SCHEMA_VERSION:
         conn.execute(
             "UPDATE metadata SET value = ? WHERE key = 'schema_version'",
-            (SCHEMA_VERSION,),
+            (str(SCHEMA_VERSION),),
         )
     conn.commit()

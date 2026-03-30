@@ -60,53 +60,58 @@ class SlurmmonApp(App):
         self.install_screen(SettingsScreen(), name="settings")
         self.push_screen("monitor")
 
-        # Detect cluster + collect in background
-        if not self.from_db:
+        # Detect cluster + optionally collect in background
+        if self.from_db:
+            self._detect_cluster_bg()
+        else:
             self._initial_collect()
+
+    def _detect_cluster_name(self) -> None:
+        """Detect the current cluster name via sinfo/scontrol."""
+        from slurmmon_cli.slurm import get_cluster_info
+
+        try:
+            info = get_cluster_info()
+            if info and info.cluster_name and info.cluster_name != "unknown":
+                self.cluster_name = info.cluster_name
+        except Exception:
+            pass
+        if not self.cluster_name:
+            try:
+                import subprocess
+                result = subprocess.run(
+                    ["scontrol", "show", "config"],
+                    capture_output=True, text=True, timeout=10,
+                )
+                for line in result.stdout.splitlines():
+                    if line.strip().startswith("ClusterName"):
+                        self.cluster_name = line.split("=", 1)[1].strip()
+                        break
+            except Exception:
+                pass
+        if self.cluster_name:
+            self.sub_title = self.cluster_name
+
+    @work(thread=True)
+    def _detect_cluster_bg(self) -> None:
+        """Detect cluster name only (no collection), for --from-db mode."""
+        self._detect_cluster_name()
+        self.call_from_thread(self._on_collect_done, {})
 
     @work(thread=True)
     def _initial_collect(self) -> None:
         """Detect cluster and run one collect cycle in background."""
         stats: dict = {}
         try:
-            from slurmmon_cli.slurm import get_cluster_info, run_slurm_command
             from slurmmon_cli.storage.collector import collect_snapshot
             from slurmmon_cli.storage.database import Database
 
-            # Detect cluster (try sinfo first, then scontrol)
-            info = get_cluster_info()
-            if info and info.cluster_name and info.cluster_name != "unknown":
-                self.cluster_name = info.cluster_name
-            if not self.cluster_name:
-                # Fallback: try scontrol for cluster name
-                try:
-                    import subprocess, json as _json
-                    result = subprocess.run(
-                        ["scontrol", "show", "config"],
-                        capture_output=True, text=True, timeout=10,
-                    )
-                    for line in result.stdout.splitlines():
-                        if line.strip().startswith("ClusterName"):
-                            self.cluster_name = line.split("=", 1)[1].strip()
-                            break
-                except Exception:
-                    pass
-            if self.cluster_name:
-                self.sub_title = self.cluster_name
+            self._detect_cluster_name()
 
-            # Then collect (force sshare on TUI startup so explorer has data)
+            # Collect (force sshare on TUI startup so explorer has data)
             db = Database(self.db_path)
             db.connect()
             try:
-                # Fix stale cluster names from earlier runs
-                if self.cluster_name:
-                    for table in ("user_usage", "jobs"):
-                        db.conn.execute(
-                            f"UPDATE {table} SET cluster = ? "
-                            "WHERE cluster IN ('', 'unknown')",
-                            (self.cluster_name,),
-                        )
-                    db.conn.commit()
                 stats = collect_snapshot(db, sshare_interval=0,
                                         cluster_override=self.cluster_name)
                 if not self.cluster_name:

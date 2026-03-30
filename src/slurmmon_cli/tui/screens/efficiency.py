@@ -115,7 +115,8 @@ class EfficiencyScreen(Screen):
         from slurmmon_cli.tui.data import fetch_gpu_user_jobs
         db_path = getattr(self.app, "db_path", None)
         user = os.environ.get("USER", "")
-        rows = fetch_gpu_user_jobs(db_path, user=user, limit=50)
+        cluster = getattr(self.app, "cluster_name", None) or None
+        rows = fetch_gpu_user_jobs(db_path, user=user, limit=50, cluster=cluster)
         self.app.call_from_thread(self._update_gpu_jobs, rows, user)
 
     def _update_gpu_jobs(self, rows: list[dict], user: str) -> None:
@@ -153,7 +154,8 @@ class EfficiencyScreen(Screen):
     def _load_gpu_queue(self) -> None:
         from slurmmon_cli.tui.data import fetch_gpu_queue
         db_path = getattr(self.app, "db_path", None)
-        data = fetch_gpu_queue(db_path)
+        cluster = getattr(self.app, "cluster_name", None) or None
+        data = fetch_gpu_queue(db_path, cluster=cluster)
         self.app.call_from_thread(self._update_gpu_queue, data)
 
     def _update_gpu_queue(self, data: dict) -> None:
@@ -211,7 +213,8 @@ class EfficiencyScreen(Screen):
     def _load_gpu_activity(self) -> None:
         from slurmmon_cli.tui.data import fetch_gpu_activity
         db_path = getattr(self.app, "db_path", None)
-        data = fetch_gpu_activity(db_path)
+        cluster = getattr(self.app, "cluster_name", None) or None
+        data = fetch_gpu_activity(db_path, cluster=cluster)
         self.app.call_from_thread(self._update_gpu_activity, data)
 
     def _update_gpu_activity(self, data: dict) -> None:
@@ -286,7 +289,8 @@ class EfficiencyScreen(Screen):
     def _load_gpu_waste(self) -> None:
         from slurmmon_cli.tui.data import fetch_gpu_waste
         db_path = getattr(self.app, "db_path", None)
-        report = fetch_gpu_waste(db_path)
+        cluster = getattr(self.app, "cluster_name", None) or None
+        report = fetch_gpu_waste(db_path, cluster=cluster)
         self.app.call_from_thread(self._update_gpu_waste, report)
 
     def _update_gpu_waste(self, report: dict) -> None:

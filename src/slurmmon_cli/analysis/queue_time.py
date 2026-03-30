@@ -7,7 +7,8 @@ from statistics import mean, median
 
 
 def _wait_times(conn: sqlite3.Connection, partition: str | None = None,
-                since: float | None = None) -> list[float]:
+                since: float | None = None,
+                cluster: str | None = None) -> list[float]:
     """Fetch raw wait times (seconds) for jobs that have started."""
     conditions = ["start_time IS NOT NULL", "submit_time IS NOT NULL",
                   "start_time > submit_time"]
@@ -18,6 +19,9 @@ def _wait_times(conn: sqlite3.Connection, partition: str | None = None,
     if since:
         conditions.append("submit_time >= ?")
         params.append(since)
+    if cluster:
+        conditions.append("cluster = ?")
+        params.append(cluster)
     where = "WHERE " + " AND ".join(conditions)
 
     rows = conn.execute(
@@ -39,9 +43,10 @@ def _percentile(sorted_vals: list[float], p: float) -> float:
 
 
 def wait_time_stats(conn: sqlite3.Connection, partition: str | None = None,
-                    since: float | None = None) -> dict:
+                    since: float | None = None,
+                    cluster: str | None = None) -> dict:
     """Aggregate wait time statistics."""
-    waits = _wait_times(conn, partition, since)
+    waits = _wait_times(conn, partition, since, cluster=cluster)
     if not waits:
         return {"count": 0, "mean": 0, "median": 0, "p90": 0, "p99": 0, "max": 0}
     return {
@@ -55,7 +60,8 @@ def wait_time_stats(conn: sqlite3.Connection, partition: str | None = None,
 
 
 def wait_time_by_hour(conn: sqlite3.Connection, partition: str | None = None,
-                      since: float | None = None) -> list[dict]:
+                      since: float | None = None,
+                      cluster: str | None = None) -> list[dict]:
     """Wait time bucketed by hour-of-day (0-23) of submission."""
     conditions = ["start_time IS NOT NULL", "submit_time IS NOT NULL",
                   "start_time > submit_time"]
@@ -66,6 +72,9 @@ def wait_time_by_hour(conn: sqlite3.Connection, partition: str | None = None,
     if since:
         conditions.append("submit_time >= ?")
         params.append(since)
+    if cluster:
+        conditions.append("cluster = ?")
+        params.append(cluster)
     where = "WHERE " + " AND ".join(conditions)
 
     rows = conn.execute(
@@ -83,7 +92,8 @@ def wait_time_by_hour(conn: sqlite3.Connection, partition: str | None = None,
 
 
 def wait_time_by_size(conn: sqlite3.Connection, partition: str | None = None,
-                      since: float | None = None) -> list[dict]:
+                      since: float | None = None,
+                      cluster: str | None = None) -> list[dict]:
     """Wait time bucketed by job CPU count ranges."""
     conditions = ["start_time IS NOT NULL", "submit_time IS NOT NULL",
                   "start_time > submit_time", "num_cpus IS NOT NULL"]
@@ -94,6 +104,9 @@ def wait_time_by_size(conn: sqlite3.Connection, partition: str | None = None,
     if since:
         conditions.append("submit_time >= ?")
         params.append(since)
+    if cluster:
+        conditions.append("cluster = ?")
+        params.append(cluster)
     where = "WHERE " + " AND ".join(conditions)
 
     rows = conn.execute(
