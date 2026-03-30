@@ -58,7 +58,8 @@ def efficiency_summary(conn: sqlite3.Connection, user: str | None = None,
 
 def low_efficiency_jobs(conn: sqlite3.Connection, threshold_pct: float = 50.0,
                         user: str | None = None, since: float | None = None,
-                        limit: int = 50) -> list[dict]:
+                        limit: int = 50,
+                        cluster: str | None = None) -> list[dict]:
     """Jobs with CPU or memory efficiency below threshold."""
     conditions = ["elapsed_s > 0", "num_cpus > 0",
                   "state IN ('COMPLETED', 'FAILED', 'TIMEOUT')"]
@@ -69,6 +70,9 @@ def low_efficiency_jobs(conn: sqlite3.Connection, threshold_pct: float = 50.0,
     if since:
         conditions.append("submit_time >= ?")
         params.append(since)
+    if cluster:
+        conditions.append("cluster = ?")
+        params.append(cluster)
     where = "WHERE " + " AND ".join(conditions)
 
     rows = conn.execute(

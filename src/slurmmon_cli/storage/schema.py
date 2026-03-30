@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 
-SCHEMA_VERSION = "5"
+SCHEMA_VERSION = "6"
 
 DDL = """
 CREATE TABLE IF NOT EXISTS jobs (
@@ -49,13 +49,15 @@ CREATE TABLE IF NOT EXISTS snapshots (
     running_jobs  INTEGER,
     pending_jobs  INTEGER,
     total_gpus    INTEGER DEFAULT 0,
-    alloc_gpus    INTEGER DEFAULT 0
+    alloc_gpus    INTEGER DEFAULT 0,
+    cluster       TEXT DEFAULT ''
 );
 
 CREATE INDEX IF NOT EXISTS idx_snap_time ON snapshots (timestamp);
+CREATE INDEX IF NOT EXISTS idx_snap_cluster ON snapshots (cluster);
 
 CREATE TABLE IF NOT EXISTS partitions (
-    name          TEXT PRIMARY KEY,
+    name          TEXT NOT NULL,
     state         TEXT,
     total_nodes   INTEGER,
     idle_nodes    INTEGER,
@@ -64,7 +66,9 @@ CREATE TABLE IF NOT EXISTS partitions (
     total_cpus    INTEGER,
     avail_cpus    INTEGER,
     max_time      TEXT,
-    last_updated  REAL
+    last_updated  REAL,
+    cluster       TEXT DEFAULT '',
+    PRIMARY KEY (name, cluster)
 );
 
 CREATE TABLE IF NOT EXISTS metadata (
@@ -125,6 +129,33 @@ def ensure_schema(conn: sqlite3.Connection) -> None:
                 conn.execute(f"ALTER TABLE snapshots ADD COLUMN {col} INTEGER DEFAULT 0")
             except Exception:
                 pass
+        conn.commit()
+
+    # Migration: v5 -> v6: add cluster to snapshots; composite PK for partitions
+    if current and current < "6":
+        try:
+            conn.execute("ALTER TABLE snapshots ADD COLUMN cluster TEXT DEFAULT ''")
+        except Exception:
+            pass
+        # Recreate partitions with composite PK (name, cluster)
+        try:
+            conn.execute("""CREATE TABLE IF NOT EXISTS partitions_new (
+                name TEXT NOT NULL, state TEXT, total_nodes INTEGER,
+                idle_nodes INTEGER, alloc_nodes INTEGER, other_nodes INTEGER,
+                total_cpus INTEGER, avail_cpus INTEGER, max_time TEXT,
+                last_updated REAL, cluster TEXT DEFAULT '',
+                PRIMARY KEY (name, cluster)
+            )""")
+            conn.execute(
+                "INSERT OR IGNORE INTO partitions_new "
+                "SELECT name, state, total_nodes, idle_nodes, alloc_nodes, "
+                "other_nodes, total_cpus, avail_cpus, max_time, last_updated, "
+                "'' FROM partitions"
+            )
+            conn.execute("DROP TABLE partitions")
+            conn.execute("ALTER TABLE partitions_new RENAME TO partitions")
+        except Exception:
+            pass
         conn.commit()
 
     conn.executescript(DDL)

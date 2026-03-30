@@ -61,33 +61,36 @@ def _upsert_jobs(db: Database, jobs: list[Job], now: float,
 
 def _insert_snapshot(db: Database, info: ClusterInfo, now: float,
                      running: int, pending: int,
-                     total_gpus: int = 0, alloc_gpus: int = 0) -> None:
+                     total_gpus: int = 0, alloc_gpus: int = 0,
+                     cluster: str = "") -> None:
     """Insert a cluster-level snapshot row."""
     conn = db.conn
     conn.execute(
         """INSERT INTO snapshots (
             timestamp, total_nodes, idle_nodes, alloc_nodes, down_nodes,
             mixed_nodes, total_cpus, alloc_cpus, running_jobs, pending_jobs,
-            total_gpus, alloc_gpus
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            total_gpus, alloc_gpus, cluster
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             now, info.total_nodes, info.idle_nodes, info.alloc_nodes,
             info.down_nodes, info.mixed_nodes, info.total_cpus,
             info.alloc_cpus, running, pending, total_gpus, alloc_gpus,
+            cluster,
         ),
     )
     conn.commit()
 
 
-def _update_partitions(db: Database, info: ClusterInfo, now: float) -> None:
+def _update_partitions(db: Database, info: ClusterInfo, now: float,
+                       cluster: str = "") -> None:
     """Replace partition records with current state."""
     conn = db.conn
     conn.executemany(
         """INSERT INTO partitions (
             name, state, total_nodes, idle_nodes, alloc_nodes, other_nodes,
-            total_cpus, avail_cpus, max_time, last_updated
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(name) DO UPDATE SET
+            total_cpus, avail_cpus, max_time, last_updated, cluster
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(name, cluster) DO UPDATE SET
             state = excluded.state,
             total_nodes = excluded.total_nodes,
             idle_nodes = excluded.idle_nodes,
@@ -102,6 +105,7 @@ def _update_partitions(db: Database, info: ClusterInfo, now: float) -> None:
             (
                 p.name, p.state, p.total_nodes, p.idle_nodes, p.alloc_nodes,
                 p.other_nodes, p.total_cpus, p.avail_cpus, p.max_time, now,
+                cluster,
             )
             for p in info.partitions
         ],
@@ -109,23 +113,26 @@ def _update_partitions(db: Database, info: ClusterInfo, now: float) -> None:
     conn.commit()
 
 
-def _get_last_collect_time(db: Database) -> str:
+def _get_last_collect_time(db: Database, cluster: str = "") -> str:
     """Get last collection timestamp for sacct --starttime, or default."""
+    key = f"last_collect_time:{cluster}" if cluster else "last_collect_time"
     row = db.conn.execute(
-        "SELECT value FROM metadata WHERE key = 'last_collect_time'"
+        "SELECT value FROM metadata WHERE key = ?", (key,)
     ).fetchone()
     if row:
         return row[0]
     return "now-24hours"
 
 
-def _set_last_collect_time(db: Database, t: float) -> None:
+def _set_last_collect_time(db: Database, t: float,
+                           cluster: str = "") -> None:
     # Store as ISO datetime for sacct --starttime compatibility
+    key = f"last_collect_time:{cluster}" if cluster else "last_collect_time"
     dt_str = datetime.datetime.fromtimestamp(t).strftime("%Y-%m-%dT%H:%M:%S")
     db.conn.execute(
-        """INSERT INTO metadata (key, value) VALUES ('last_collect_time', ?)
+        """INSERT INTO metadata (key, value) VALUES (?, ?)
            ON CONFLICT(key) DO UPDATE SET value = excluded.value""",
-        (dt_str,),
+        (key, dt_str),
     )
     db.conn.commit()
 
@@ -232,23 +239,25 @@ def collect_snapshot(db: Database, sshare_interval: int = 1800,
         except Exception:
             pass
         _insert_snapshot(db, cluster_info, now, running, pending,
-                         total_gpus=total_gpus, alloc_gpus=alloc_gpus)
-        _update_partitions(db, cluster_info, now)
+                         total_gpus=total_gpus, alloc_gpus=alloc_gpus,
+                         cluster=cluster_name)
+        _update_partitions(db, cluster_info, now, cluster=cluster_name)
 
     # 4. Recently completed jobs
-    starttime = _get_last_collect_time(db)
+    starttime = _get_last_collect_time(db, cluster=cluster_name)
     history_jobs = get_job_history(starttime=starttime)
     if history_jobs:
         _upsert_jobs(db, history_jobs, now, cluster=cluster_name)
         stats["history_jobs"] = len(history_jobs)
 
-    _set_last_collect_time(db, now)
+    _set_last_collect_time(db, now, cluster=cluster_name)
 
     # 5. sshare (gated by interval)
-    last_sshare = _get_metadata_float(db, "last_sshare_time")
+    sshare_key = f"last_sshare_time:{cluster_name}" if cluster_name else "last_sshare_time"
+    last_sshare = _get_metadata_float(db, sshare_key)
     if last_sshare is None or (now - last_sshare) >= sshare_interval:
         stats["sshare_users"] = _collect_sshare(db, now, cluster=cluster_name)
-        _set_metadata(db, "last_sshare_time", str(int(now)))
+        _set_metadata(db, sshare_key, str(int(now)))
 
     # 5. Prune
     stats["pruned"] = prune_old_jobs(db)

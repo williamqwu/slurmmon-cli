@@ -66,7 +66,7 @@ class TestSchema:
             "SELECT value FROM metadata WHERE key='schema_version'"
         ).fetchone()
         assert row is not None
-        assert row[0] == "3"
+        assert row[0] == "6"
         db.close()
 
     def test_idempotent(self, tmp_db):
@@ -124,6 +124,23 @@ class TestInsertSnapshot:
         assert row["total_nodes"] == 10
         db.close()
 
+    def test_cluster_tagged(self, tmp_db):
+        db = Database(tmp_db)
+        db.connect()
+        info = _make_cluster_info()
+        now = time.time()
+        _insert_snapshot(db, info, now, running=3, pending=1, cluster="cardinal")
+        _insert_snapshot(db, info, now + 1, running=7, pending=2, cluster="ascend")
+        rows = db.conn.execute(
+            "SELECT cluster, running_jobs FROM snapshots ORDER BY id"
+        ).fetchall()
+        assert len(rows) == 2
+        assert rows[0]["cluster"] == "cardinal"
+        assert rows[0]["running_jobs"] == 3
+        assert rows[1]["cluster"] == "ascend"
+        assert rows[1]["running_jobs"] == 7
+        db.close()
+
 
 class TestUpdatePartitions:
     def test_insert_and_update(self, tmp_db):
@@ -145,6 +162,31 @@ class TestUpdatePartitions:
         _update_partitions(db, info, now + 10)
         row = db.conn.execute("SELECT * FROM partitions WHERE name='batch'").fetchone()
         assert row["total_nodes"] == 12
+        db.close()
+
+    def test_composite_pk_different_clusters(self, tmp_db):
+        """Same partition name on different clusters should coexist."""
+        db = Database(tmp_db)
+        db.connect()
+        info = _make_cluster_info()
+        now = time.time()
+        _update_partitions(db, info, now, cluster="cardinal")
+        # Overwrite with different node counts for ascend
+        info2 = _make_cluster_info()
+        info2.partitions[0] = PartitionInfo(
+            name="batch", state="UP", total_nodes=20, idle_nodes=8,
+            alloc_nodes=10, other_nodes=2, total_cpus=160, avail_cpus=64,
+            max_time="3-00:00:00",
+        )
+        _update_partitions(db, info2, now, cluster="ascend")
+        rows = db.conn.execute(
+            "SELECT name, cluster, total_nodes FROM partitions ORDER BY cluster"
+        ).fetchall()
+        assert len(rows) == 2
+        ascend = [r for r in rows if r["cluster"] == "ascend"][0]
+        cardinal = [r for r in rows if r["cluster"] == "cardinal"][0]
+        assert ascend["total_nodes"] == 20
+        assert cardinal["total_nodes"] == 10
         db.close()
 
 

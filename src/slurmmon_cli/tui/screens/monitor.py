@@ -71,7 +71,8 @@ class MonitorScreen(Screen):
         partition_filter = getattr(app, "partition_filter", None)
 
         if from_db:
-            jobs, info = fetch_from_db(db_path, user_filter)
+            cluster = getattr(app, "cluster_name", None) or None
+            jobs, info = fetch_from_db(db_path, user_filter, cluster=cluster)
         else:
             jobs, info = fetch_live(user_filter, partition_filter)
 
@@ -104,10 +105,11 @@ class MonitorScreen(Screen):
                 pt.add_row(p.name, nodes_str, cpus_str, p.state, p.max_time or "-")
 
         # Running jobs
+        max_display = 200
         rt = self.query_one("#running-table", DataTable)
         rt.clear()
         sorted_running = sorted(running, key=lambda j: j.elapsed_s or 0, reverse=True)
-        for j in sorted_running[:100]:
+        for j in sorted_running[:max_display]:
             rt.add_row(
                 j.job_id,
                 j.user,
@@ -118,6 +120,11 @@ class MonitorScreen(Screen):
                 format_duration(j.elapsed_s),
                 format_duration(j.time_limit_s),
             )
+        if len(sorted_running) > max_display:
+            rt.add_row(
+                "...", f"({len(sorted_running) - max_display} more)",
+                "", "", "", "", "", "",
+            )
 
         # Pending jobs
         pdt = self.query_one("#pending-table", DataTable)
@@ -127,7 +134,7 @@ class MonitorScreen(Screen):
             key=lambda j: (now - j.submit_time) if j.submit_time else 0,
             reverse=True,
         )
-        for j in sorted_pending[:100]:
+        for j in sorted_pending[:max_display]:
             wait = format_duration(now - j.submit_time if j.submit_time else None)
             pdt.add_row(
                 j.job_id,
@@ -138,6 +145,11 @@ class MonitorScreen(Screen):
                 format_mem(j.req_mem_mb),
                 wait,
                 j.reason or "-",
+            )
+        if len(sorted_pending) > max_display:
+            pdt.add_row(
+                "...", f"({len(sorted_pending) - max_display} more)",
+                "", "", "", "", "", "",
             )
 
     def action_refresh(self) -> None:
