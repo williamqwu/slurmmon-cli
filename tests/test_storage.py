@@ -66,7 +66,7 @@ class TestSchema:
             "SELECT value FROM metadata WHERE key='schema_version'"
         ).fetchone()
         assert row is not None
-        assert row[0] == "6"
+        assert int(row[0]) == 6
         db.close()
 
     def test_idempotent(self, tmp_db):

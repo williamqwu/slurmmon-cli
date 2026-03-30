@@ -71,7 +71,16 @@ def fetch_from_db(
         snap = conn.execute(
             "SELECT * FROM snapshots ORDER BY timestamp DESC LIMIT 1"
         ).fetchone()
-        part_rows = conn.execute("SELECT * FROM partitions").fetchall()
+        # Derive cluster from latest snapshot to avoid mixing partitions
+        snap_cluster = ""
+        if snap and "cluster" in snap.keys():
+            snap_cluster = snap["cluster"] or ""
+        if snap_cluster:
+            part_rows = conn.execute(
+                "SELECT * FROM partitions WHERE cluster = ?", (snap_cluster,)
+            ).fetchall()
+        else:
+            part_rows = conn.execute("SELECT * FROM partitions").fetchall()
 
     partitions = [
         PartitionInfo(

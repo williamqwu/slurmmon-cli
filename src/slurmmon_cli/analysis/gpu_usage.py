@@ -212,8 +212,10 @@ def usage_delta(conn: sqlite3.Connection, hours: int = 24,
 
     # Join latest and earlier snapshots by user
     cluster_filter = ""
+    cluster_join = ""
     if cluster:
         cluster_filter = " AND cur.cluster = ?"
+        cluster_join = " AND cur.cluster = prev.cluster"
     join_params: list = [ts_earlier, ts_latest]
     if cluster:
         join_params.append(cluster)
@@ -225,7 +227,7 @@ def usage_delta(conn: sqlite3.Connection, hours: int = 24,
             cur.gpu_tres_mins AS gpu_total
         FROM user_usage cur
         LEFT JOIN user_usage prev
-            ON cur.user = prev.user AND prev.collected_at = ?
+            ON cur.user = prev.user AND prev.collected_at = ?{cluster_join}
         WHERE cur.collected_at = ?{cluster_filter}
             AND (cur.gpu_tres_mins - COALESCE(prev.gpu_tres_mins, 0)) > 0
         ORDER BY gpu_delta DESC""",
