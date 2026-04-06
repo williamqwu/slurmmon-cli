@@ -10,6 +10,7 @@ from slurmmon_cli.storage.collector import (
     _upsert_jobs,
     _insert_snapshot,
     _update_partitions,
+    _expire_stale_jobs,
     collect_snapshot,
     prune_old_jobs,
 )
@@ -202,6 +203,79 @@ class TestPrune:
         assert pruned == 1
         remaining = db.conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0]
         assert remaining == 1
+        db.close()
+
+
+class TestExpireStaleJobs:
+    def test_expire_stale_running(self, tmp_db):
+        db = Database(tmp_db)
+        db.connect()
+        now = time.time()
+        _upsert_jobs(db, [_make_job(state="RUNNING")], now - 600, cluster="cardinal")
+        expired = _expire_stale_jobs(db, now, cluster="cardinal")
+        assert expired == 1
+        row = db.conn.execute("SELECT state, end_time FROM jobs WHERE job_id='100'").fetchone()
+        assert row["state"] == "COMPLETED"
+        assert row["end_time"] == now
+        db.close()
+
+    def test_expire_stale_pending(self, tmp_db):
+        db = Database(tmp_db)
+        db.connect()
+        now = time.time()
+        _upsert_jobs(db, [_make_job(state="PENDING")], now - 600, cluster="cardinal")
+        expired = _expire_stale_jobs(db, now, cluster="cardinal")
+        assert expired == 1
+        row = db.conn.execute("SELECT state FROM jobs WHERE job_id='100'").fetchone()
+        assert row["state"] == "COMPLETED"
+        db.close()
+
+    def test_does_not_expire_current_jobs(self, tmp_db):
+        db = Database(tmp_db)
+        db.connect()
+        now = time.time()
+        _upsert_jobs(db, [_make_job(state="RUNNING")], now, cluster="cardinal")
+        expired = _expire_stale_jobs(db, now, cluster="cardinal")
+        assert expired == 0
+        row = db.conn.execute("SELECT state FROM jobs WHERE job_id='100'").fetchone()
+        assert row["state"] == "RUNNING"
+        db.close()
+
+    def test_does_not_touch_completed(self, tmp_db):
+        db = Database(tmp_db)
+        db.connect()
+        now = time.time()
+        _upsert_jobs(db, [_make_job(state="COMPLETED")], now - 600, cluster="cardinal")
+        expired = _expire_stale_jobs(db, now, cluster="cardinal")
+        assert expired == 0
+        db.close()
+
+    def test_cluster_scoping(self, tmp_db):
+        db = Database(tmp_db)
+        db.connect()
+        now = time.time()
+        _upsert_jobs(db, [_make_job(job_id="c1", state="RUNNING")], now - 600, cluster="cardinal")
+        _upsert_jobs(db, [_make_job(job_id="a1", state="RUNNING")], now - 600, cluster="ascend")
+        expired = _expire_stale_jobs(db, now, cluster="cardinal")
+        assert expired == 1
+        cardinal = db.conn.execute("SELECT state FROM jobs WHERE job_id='c1'").fetchone()
+        ascend = db.conn.execute("SELECT state FROM jobs WHERE job_id='a1'").fetchone()
+        assert cardinal["state"] == "COMPLETED"
+        assert ascend["state"] == "RUNNING"
+        db.close()
+
+    def test_collect_snapshot_expires_stale(self, mock_slurm, tmp_db):
+        """Stale job inserted before collect_snapshot should get expired."""
+        db = Database(tmp_db)
+        db.connect()
+        old_time = time.time() - 600
+        # Mock sinfo reports cluster "ascend", so tag the stale job accordingly
+        _upsert_jobs(db, [_make_job(job_id="stale1", state="RUNNING")],
+                      old_time, cluster="ascend")
+        stats = collect_snapshot(db)
+        assert stats["expired"] >= 1
+        row = db.conn.execute("SELECT state FROM jobs WHERE job_id='stale1'").fetchone()
+        assert row["state"] == "COMPLETED"
         db.close()
 
 

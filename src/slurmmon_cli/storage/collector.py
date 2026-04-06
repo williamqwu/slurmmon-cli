@@ -158,6 +158,33 @@ def _set_metadata(db: Database, key: str, value: str) -> None:
     db.conn.commit()
 
 
+def _expire_stale_jobs(db: Database, now: float, cluster: str = "") -> int:
+    """Mark RUNNING/PENDING jobs not seen this collection cycle as COMPLETED.
+
+    After both squeue and sacct upserts run, any RUNNING/PENDING job whose
+    last_seen is still less than *now* was not reported by either source.
+    We treat it as completed (sacct already had its chance to provide the
+    real terminal state).
+    """
+    if cluster:
+        cursor = db.conn.execute(
+            """UPDATE jobs SET state = 'COMPLETED', end_time = ?
+               WHERE state IN ('RUNNING', 'PENDING')
+                 AND cluster = ?
+                 AND last_seen < ?""",
+            (now, cluster, now),
+        )
+    else:
+        cursor = db.conn.execute(
+            """UPDATE jobs SET state = 'COMPLETED', end_time = ?
+               WHERE state IN ('RUNNING', 'PENDING')
+                 AND last_seen < ?""",
+            (now, now),
+        )
+    db.conn.commit()
+    return cursor.rowcount
+
+
 def prune_old_jobs(db: Database, retention_days: int = 30) -> int:
     """Delete jobs older than retention_days. Returns deleted count."""
     cutoff = time.time() - (retention_days * 86400)
@@ -212,7 +239,7 @@ def collect_snapshot(db: Database, sshare_interval: int = 1800,
     now = time.time()
     stats: dict = {
         "timestamp": now, "queue_jobs": 0, "history_jobs": 0,
-        "sshare_users": 0, "pruned": 0,
+        "expired": 0, "sshare_users": 0, "pruned": 0,
     }
 
     # 1. Cluster info (resolved early so jobs can be tagged)
@@ -251,6 +278,13 @@ def collect_snapshot(db: Database, sshare_interval: int = 1800,
         stats["history_jobs"] = len(history_jobs)
 
     _set_last_collect_time(db, now, cluster=cluster_name)
+
+    # 4b. Expire stale queue jobs (only if squeue returned data)
+    if queue_jobs:
+        expired = _expire_stale_jobs(db, now, cluster=cluster_name)
+        stats["expired"] = expired
+        if expired:
+            log.info("Expired %d stale RUNNING/PENDING jobs", expired)
 
     # 5. sshare (gated by interval)
     sshare_key = f"last_sshare_time:{cluster_name}" if cluster_name else "last_sshare_time"
@@ -298,9 +332,10 @@ def run_collector(db_path: str | None = None, interval: int = 300,
                 stats = collect_snapshot(db, sshare_interval=sshare_interval,
                                         cluster_override=cluster)
                 log.info(
-                    "Collected: %d queue + %d history jobs, %d sshare users, pruned %d",
+                    "Collected: %d queue + %d history jobs, %d sshare users, "
+                    "expired %d stale, pruned %d",
                     stats["queue_jobs"], stats["history_jobs"],
-                    stats["sshare_users"], stats["pruned"],
+                    stats["sshare_users"], stats["expired"], stats["pruned"],
                 )
             except Exception:
                 log.exception("Collection cycle failed")
