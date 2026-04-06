@@ -21,10 +21,16 @@ Lightweight CLI tool for monitoring Slurm cluster jobs. Designed to run on login
 ### Install
 
 ```bash
-pip install -e ".[tui]"
+pip install -e .
 ```
 
-Requires Python 3.10+. The `[tui]` extra installs [Textual](https://github.com/Textualize/textual) for the interactive dashboard. Without it, only CLI commands are available.
+Requires Python 3.10+. This installs the TUI dashboard ([Textual](https://github.com/Textualize/textual)) by default.
+
+For a minimal install without the TUI (CLI commands only). Note that `--no-deps` skips all dependencies; this works because the CLI uses only the standard library:
+
+```bash
+pip install --no-deps -e .
+```
 
 ### Multi-cluster environments (e.g., OSC)
 

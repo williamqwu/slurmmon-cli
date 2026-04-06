@@ -7,15 +7,17 @@ name = "slurmmon-cli"
 version = "0.1.0"
 description = "Lightweight CLI Slurm cluster job monitor"
 requires-python = ">=3.10"
+dependencies = [
+    "textual>=1.0.0",
+    "textual-plotext>=0.2.0",
+]
 
 [project.scripts]
 slurmmon-cli = "slurmmon_cli.cli:main"
 
 [project.optional-dependencies]
-tui = [
-    "textual>=1.0.0",
-    "textual-plotext>=0.2.0",
-]
+# Kept for backwards compatibility: pip install ".[tui]" still works
+tui = []
 
 [tool.setuptools.packages.find]
 where = ["src"]

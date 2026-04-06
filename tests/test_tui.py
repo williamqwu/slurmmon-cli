@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from slurmmon_cli.tui.formatting import (
+    annotate_clusters,
     format_duration,
     format_mem,
     pct_str,
@@ -108,3 +109,34 @@ class TestPctStr:
 
     def test_zero(self):
         assert pct_str(0.0) == "0%"
+
+
+class TestAnnotateClusters:
+    def test_no_clusters(self):
+        assert annotate_clusters([], None) == "-"
+
+    def test_all_fresh(self):
+        now = 1700000000.0
+        freshness = {"cardinal": now - 60, "ascend": now - 120}
+        result = annotate_clusters(["ascend", "cardinal"], freshness, now=now)
+        assert result == "ascend, cardinal"
+
+    def test_one_stale(self):
+        now = 1700000000.0
+        freshness = {"cardinal": now - 60, "ascend": now - 200000}
+        result = annotate_clusters(["ascend", "cardinal"], freshness, now=now)
+        assert "ascend (stale:" in result
+        assert "cardinal" in result
+        assert "(stale:" not in result.split("cardinal")[0].split(",")[-1]
+
+    def test_no_freshness_data(self):
+        result = annotate_clusters(["cardinal"], None)
+        assert result == "cardinal"
+
+    def test_custom_threshold(self):
+        now = 1700000000.0
+        freshness = {"cardinal": now - 100}
+        assert "(stale:" not in annotate_clusters(
+            ["cardinal"], freshness, now=now, threshold=900)
+        assert "(stale:" in annotate_clusters(
+            ["cardinal"], freshness, now=now, threshold=50)
