@@ -242,14 +242,18 @@ def _parse_squeue_job(raw: dict) -> Job:
     )
 
 
-def get_queue(user: str | None = None) -> list[Job]:
-    """Fetch current job queue via ``squeue --json``."""
+def get_queue(user: str | None = None) -> list[Job] | None:
+    """Fetch current job queue via ``squeue --json``.
+
+    Returns None when squeue fails (command error / timeout), or a
+    (possibly empty) list on success.
+    """
     cmd = ["squeue", "--json"]
     if user:
         cmd.extend(["--user", user])
     data = run_slurm_command(cmd)
     if data is None:
-        return []
+        return None
     jobs = []
     for raw in data.get("jobs", []):
         try:
@@ -975,7 +979,7 @@ def get_node_utilization() -> list[NodeUtilization]:
 
 def get_running_jobs_by_node() -> dict[str, list[str]]:
     """Map node names to users with running jobs on them."""
-    jobs = get_queue()
+    jobs = get_queue() or []
     node_users: dict[str, list[str]] = {}
     for job in jobs:
         if job.state != "RUNNING" or not job.node_list:
@@ -991,7 +995,7 @@ def get_running_jobs_by_node() -> dict[str, list[str]]:
 
 def get_jobs_on_node(node_name: str) -> list[Job]:
     """Get all running jobs on a specific node."""
-    jobs = get_queue()
+    jobs = get_queue() or []
     result: list[Job] = []
     for job in jobs:
         if job.state != "RUNNING" or not job.node_list:

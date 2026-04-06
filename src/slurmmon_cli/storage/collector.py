@@ -248,16 +248,16 @@ def collect_snapshot(db: Database, sshare_interval: int = 1800,
     cluster_name = cluster_override or (sinfo_name if sinfo_name != "unknown" else "")
     stats["cluster"] = cluster_name
 
-    # 2. Current queue
+    # 2. Current queue (None means squeue failed; [] means empty queue)
     queue_jobs = get_queue()
-    if queue_jobs:
+    if queue_jobs is not None and queue_jobs:
         _upsert_jobs(db, queue_jobs, now, cluster=cluster_name)
         stats["queue_jobs"] = len(queue_jobs)
 
     # 3. Cluster snapshot + partitions (include GPU counts from node data)
     if cluster_info:
-        running = sum(1 for j in queue_jobs if j.state == "RUNNING")
-        pending = sum(1 for j in queue_jobs if j.state == "PENDING")
+        running = sum(1 for j in (queue_jobs or []) if j.state == "RUNNING")
+        pending = sum(1 for j in (queue_jobs or []) if j.state == "PENDING")
         total_gpus = alloc_gpus = 0
         try:
             for n in get_node_utilization():
@@ -279,8 +279,8 @@ def collect_snapshot(db: Database, sshare_interval: int = 1800,
 
     _set_last_collect_time(db, now, cluster=cluster_name)
 
-    # 4b. Expire stale queue jobs (only if squeue returned data)
-    if queue_jobs:
+    # 4b. Expire stale queue jobs (only if squeue succeeded, even with 0 jobs)
+    if queue_jobs is not None:
         expired = _expire_stale_jobs(db, now, cluster=cluster_name)
         stats["expired"] = expired
         if expired:

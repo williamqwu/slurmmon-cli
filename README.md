@@ -26,7 +26,7 @@ pip install -e .
 
 Requires Python 3.10+. This installs the TUI dashboard ([Textual](https://github.com/Textualize/textual)) by default.
 
-For a minimal install without the TUI (CLI commands only):
+For a minimal install without the TUI (CLI commands only). Note that `--no-deps` skips all dependencies; this works because the CLI uses only the standard library:
 
 ```bash
 pip install --no-deps -e .

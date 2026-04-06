@@ -15,7 +15,7 @@ def fetch_live(
     partition_filter: str | None = None,
 ) -> tuple[list[Job], ClusterInfo | None]:
     """Fetch live data from Slurm commands."""
-    jobs = get_queue(user=user_filter)
+    jobs = get_queue(user=user_filter) or []
     info = get_cluster_info()
     return jobs, info
 
