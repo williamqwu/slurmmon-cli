@@ -71,3 +71,32 @@ def pct_str(val: float | None) -> str:
     if val is None:
         return "-"
     return f"{val:.0f}%"
+
+
+# Default staleness threshold: 15 minutes (3x the default 5-min collect interval)
+STALE_CLUSTER_THRESHOLD_S = 900
+
+
+def annotate_clusters(
+    clusters: list[str],
+    freshness: dict[str, float] | None,
+    now: float | None = None,
+    threshold: float = STALE_CLUSTER_THRESHOLD_S,
+) -> str:
+    """Build a cluster string, annotating stale ones with their data age.
+
+    Returns e.g. ``"ascend (stale: 2d 3h), cardinal"``.
+    """
+    if not clusters:
+        return "-"
+    if now is None:
+        import time as _time
+        now = _time.time()
+    parts: list[str] = []
+    for c in clusters:
+        last_t = (freshness or {}).get(c)
+        if last_t is not None and (now - last_t) > threshold:
+            parts.append(f"{c} (stale: {format_duration(now - last_t)})")
+        else:
+            parts.append(c)
+    return ", ".join(parts)

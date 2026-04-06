@@ -141,6 +141,30 @@ def _rows_to_jobs(rows) -> list[Job]:
     ]
 
 
+def fetch_cluster_freshness(db_path: str | None) -> dict[str, float]:
+    """Return ``{cluster_name: last_collect_epoch}`` for all known clusters."""
+    import datetime as _dt
+    from slurmmon_cli.storage.database import Database
+
+    db = Database(db_path)
+    with db:
+        rows = db.conn.execute(
+            "SELECT key, value FROM metadata WHERE key LIKE 'last_collect_time:%'"
+        ).fetchall()
+
+    result: dict[str, float] = {}
+    for r in rows:
+        cluster = r["key"].replace("last_collect_time:", "", 1)
+        if not cluster:
+            continue
+        try:
+            dt = _dt.datetime.strptime(r["value"], "%Y-%m-%dT%H:%M:%S")
+            result[cluster] = dt.timestamp()
+        except (ValueError, TypeError):
+            pass
+    return result
+
+
 def fetch_user_jobs(db_path: str | None, user: str,
                     gpu_only: bool = False,
                     cluster: str | None = None) -> list[Job]:

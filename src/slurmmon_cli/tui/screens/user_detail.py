@@ -9,7 +9,7 @@ from textual.screen import ModalScreen
 from textual.widgets import DataTable, Static
 from textual import work
 
-from slurmmon_cli.tui.formatting import format_duration, format_mem
+from slurmmon_cli.tui.formatting import format_duration, format_mem, annotate_clusters
 
 
 def _build_grafana_url(nodes: list[str]) -> str:
@@ -28,6 +28,7 @@ class UserDetailScreen(ModalScreen):
     BINDINGS = [
         Binding("escape", "dismiss", "Close", show=True),
         Binding("g", "grafana", "Grafana URL", show=True),
+        Binding("s", "squeue_cmd", "squeue cmd", show=True),
     ]
 
     DEFAULT_CSS = """
@@ -58,7 +59,9 @@ class UserDetailScreen(ModalScreen):
             yield Static("", id="user-info")
             yield DataTable(id="user-jobs-table")
             yield Static(
-                " \\[g] copy Grafana URL for running nodes  \\[esc] close",
+                " \\[g] copy Grafana URL for running nodes"
+                "  \\[s] copy squeue verify command"
+                "  \\[esc] close",
                 id="user-detail-hint",
             )
 
@@ -79,12 +82,13 @@ class UserDetailScreen(ModalScreen):
 
     @work(thread=True)
     def _load_jobs(self) -> None:
-        from slurmmon_cli.tui.data import fetch_user_jobs
+        from slurmmon_cli.tui.data import fetch_user_jobs, fetch_cluster_freshness
         db_path = getattr(self.app, "db_path", None)
         jobs = fetch_user_jobs(db_path, self._user, gpu_only=self._gpu_only)
-        self.app.call_from_thread(self._update_jobs, jobs)
+        freshness = fetch_cluster_freshness(db_path)
+        self.app.call_from_thread(self._update_jobs, jobs, freshness)
 
-    def _update_jobs(self, jobs) -> None:
+    def _update_jobs(self, jobs, freshness=None) -> None:
         self._jobs = jobs
         running = sum(1 for j in jobs if j.state == "RUNNING")
         pending = sum(1 for j in jobs if j.state == "PENDING")
@@ -94,7 +98,7 @@ class UserDetailScreen(ModalScreen):
         clusters = sorted({j.cluster for j in jobs if j.cluster})
         label = "GPU jobs" if self._gpu_only else "Jobs"
         acct_str = ", ".join(accounts) if accounts else "-"
-        cluster_str = ", ".join(clusters) if clusters else "-"
+        cluster_str = annotate_clusters(clusters, freshness)
         self.query_one("#user-info", Static).update(
             f" User: {self._user}    Account(s): {acct_str}"
             f"    Cluster(s): {cluster_str}\n"
@@ -139,6 +143,18 @@ class UserDetailScreen(ModalScreen):
         self.app.copy_to_clipboard(url)
         self.notify(
             f"Grafana URL copied ({len(all_nodes)} nodes)",
+            severity="information",
+        )
+
+    def action_squeue_cmd(self) -> None:
+        """Copy a squeue command for verifying this user's jobs."""
+        cmd = (
+            f'squeue -u {self._user}'
+            f' -o "%.18i %.12P %.8u %.4t %.6C %.4D %.11M %.12l %.20S %R"'
+        )
+        self.app.copy_to_clipboard(cmd)
+        self.notify(
+            f"squeue command copied for {self._user}",
             severity="information",
         )
 
